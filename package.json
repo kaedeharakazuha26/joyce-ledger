@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri",
     "icons": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri icon src-tauri/app-icon.png",
-    "test:rust": "PATH=\"$HOME/.cargo/bin:$PATH\" cargo test --manifest-path src-tauri/Cargo.toml"
+    "test:rust": "PATH=\"$HOME/.cargo/bin:$PATH\" cargo test --manifest-path src-tauri/Cargo.toml",
+    "build:tauri": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",
