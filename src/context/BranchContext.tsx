@@ -5,6 +5,7 @@ import {
   getActiveBranch,
   listBranches,
   setActiveBranch as apiSetActiveBranch,
+  updateBranch as apiUpdateBranch,
 } from "../lib/api";
 import type { Branch } from "../types/models";
 
@@ -15,6 +16,7 @@ interface BranchContextValue {
   loading: boolean;
   switchBranch: (branchId: string) => Promise<void>;
   createBranch: (name: string) => Promise<Branch>;
+  updateBranch: (branchId: string, name: string) => Promise<Branch>;
   deleteBranch: (branchId: string, pin: string) => Promise<void>;
   refreshBranches: () => Promise<void>;
 }
@@ -71,6 +73,20 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
     [refreshBranches, switchBranch],
   );
 
+  const updateBranch = useCallback(
+    async (branchId: string, name: string) => {
+      try {
+        const updated = await apiUpdateBranch(branchId, name);
+        await refreshBranches();
+        return updated;
+      } catch (e) {
+        console.error("Failed to update branch", e);
+        throw e;
+      }
+    },
+    [refreshBranches],
+  );
+
   const deleteBranch = useCallback(
     async (branchId: string, pin: string) => {
       try {
@@ -98,6 +114,7 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
         loading,
         switchBranch,
         createBranch,
+        updateBranch,
         deleteBranch,
         refreshBranches,
       }}

@@ -153,6 +153,38 @@ pub fn create_branch(state: State<'_, DbState>, name: String) -> AppResult<Branc
 }
 
 #[tauri::command]
+pub fn update_branch(
+    state: State<'_, DbState>,
+    branch_id: String,
+    name: String,
+) -> AppResult<Branch> {
+    let clean_name = require_text("Branch name", &name)?;
+    let conn = state.conn()?;
+
+    let rows_affected = conn.execute(
+        "UPDATE branches SET name = ?1 WHERE id = ?2",
+        params![clean_name, branch_id],
+    )?;
+
+    if rows_affected == 0 {
+        return Err(AppError::validation("The specified branch does not exist."));
+    }
+
+    conn.query_row(
+        "SELECT id, name, created_at FROM branches WHERE id = ?1",
+        params![branch_id],
+        |r| {
+            Ok(Branch {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                created_at: r.get(2)?,
+            })
+        },
+    )
+    .map_err(AppError::Database)
+}
+
+#[tauri::command]
 pub fn reset_database(
     state: State<'_, DbState>,
     branch_id: String,
@@ -270,5 +302,18 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM branches", [], |r| r.get(0))
             .unwrap();
         assert!(count >= 2);
+    }
+
+    #[test]
+    fn update_branch_name() {
+        let conn = open_in_memory().unwrap();
+        let rows = conn
+            .execute("UPDATE branches SET name = 'Joyce Timog' WHERE id = 'main'", [])
+            .unwrap();
+        assert_eq!(rows, 1);
+        let name: String = conn
+            .query_row("SELECT name FROM branches WHERE id = 'main'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(name, "Joyce Timog");
     }
 }

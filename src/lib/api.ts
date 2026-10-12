@@ -79,3 +79,6 @@ export const resetDatabase = (branchId: string, pin: string, resetType: string) 
 
 export const deleteBranch = (branchId: string, pin: string) =>
   invoke<void>("delete_branch", { branchId, pin });
+
+export const updateBranch = (branchId: string, name: string) =>
+  invoke<Branch>("update_branch", { branchId, name });

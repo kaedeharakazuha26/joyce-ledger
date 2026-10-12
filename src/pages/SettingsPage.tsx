@@ -17,7 +17,7 @@ import { todayLocal } from "../lib/dates";
 
 export function SettingsPage() {
   const toast = useToast();
-  const { branches, refreshBranches, deleteBranch } = useBranch();
+  const { branches, refreshBranches, deleteBranch, updateBranch, currentBranchId } = useBranch();
 
   // Backup & Restore states
   const [backingUp, setBackingUp] = useState(false);
@@ -31,6 +31,12 @@ export function SettingsPage() {
   const [confirmNewPin, setConfirmNewPin] = useState("");
   const [showPins, setShowPins] = useState(false);
   const [changingPin, setChangingPin] = useState(false);
+
+  // Edit Branch Name states
+  const [editBranchModalOpen, setEditBranchModalOpen] = useState(false);
+  const [editBranchId, setEditBranchId] = useState<string>("main");
+  const [editBranchName, setEditBranchName] = useState<string>("");
+  const [savingBranchName, setSavingBranchName] = useState(false);
 
   // Reset Database Modal states
   const [resetModalOpen, setResetModalOpen] = useState(false);
@@ -56,6 +62,40 @@ export function SettingsPage() {
       setDeleteBranchId(customBranches[0].id);
     }
   }, [customBranches, deleteBranchId]);
+
+  const handleOpenEditBranch = (branchId?: string) => {
+    const targetId = branchId || currentBranchId || (branches[0]?.id ?? "main");
+    const target = branches.find((b) => b.id === targetId);
+    setEditBranchId(targetId);
+    setEditBranchName(target?.name || "");
+    setEditBranchModalOpen(true);
+  };
+
+  const handleBranchSelectChange = (newId: string) => {
+    setEditBranchId(newId);
+    const target = branches.find((b) => b.id === newId);
+    if (target) {
+      setEditBranchName(target.name);
+    }
+  };
+
+  const handleSaveBranchName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editBranchName.trim()) {
+      toast.error("Branch name cannot be empty.");
+      return;
+    }
+    setSavingBranchName(true);
+    try {
+      const updated = await updateBranch(editBranchId, editBranchName.trim());
+      toast.success(`Branch renamed to "${updated.name}".`);
+      setEditBranchModalOpen(false);
+    } catch (err) {
+      toast.error(`Failed to update branch name: ${errorMessage(err)}`);
+    } finally {
+      setSavingBranchName(false);
+    }
+  };
 
   // --- Handlers: Backup & Restore ---
   const handleBackup = async () => {
@@ -297,6 +337,80 @@ export function SettingsPage() {
           </form>
         </section>
 
+        {/* Branch Management & Renaming Section */}
+        <section className="card card-hover p-6 shadow-sm border-amber-500/20">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                  Branch Locations & Setup
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Manage branch names and business identities across all your restobar locations.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              id="settings-edit-branch-btn"
+              onClick={() => handleOpenEditBranch(currentBranchId)}
+              className="btn border border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 text-xs font-bold dark:text-amber-300 transition flex items-center gap-1.5"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              Edit Branch Name…
+            </button>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {branches.map((b) => {
+              const isCurrent = b.id === currentBranchId;
+              return (
+                <div
+                  key={b.id}
+                  className={`flex items-center justify-between rounded-xl border p-3.5 transition-all ${
+                    isCurrent
+                      ? "border-amber-500/50 bg-amber-50/50 shadow-sm dark:border-amber-500/40 dark:bg-amber-950/20"
+                      : "border-slate-200 bg-slate-50/40 dark:border-slate-800 dark:bg-slate-950/30"
+                  }`}
+                >
+                  <div className="truncate pr-2">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                        {b.name}
+                      </p>
+                      {b.id === "main" && (
+                        <span className="rounded bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          Primary
+                        </span>
+                      )}
+                    </div>
+                    <p className="truncate text-[11px] font-mono text-slate-400">{b.id}</p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditBranch(b.id)}
+                    className="shrink-0 rounded-lg p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition"
+                    title={`Rename ${b.name}`}
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
         {/* Database Backup & Restore Section */}
         <section className="card p-6 shadow-sm">
           <div className="flex items-center justify-between">
@@ -516,6 +630,73 @@ export function SettingsPage() {
           </div>
         </section>
       </div>
+
+      {/* Edit Branch Name Modal */}
+      <Modal
+        open={editBranchModalOpen}
+        title="Edit Branch Name"
+        onClose={() => setEditBranchModalOpen(false)}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setEditBranchModalOpen(false)}
+              disabled={savingBranchName}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={(e) => void handleSaveBranchName(e)}
+              disabled={savingBranchName || !editBranchName.trim()}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              {savingBranchName ? "Saving…" : "Save Branch Name"}
+            </button>
+          </>
+        }
+      >
+        <form onSubmit={(e) => void handleSaveBranchName(e)} className="space-y-4">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Rename this branch. All transactions, staff assignments, and records for this branch will remain fully linked.
+          </p>
+
+          <div>
+            <label className="label">Select Branch to Rename</label>
+            <select
+              value={editBranchId}
+              onChange={(e) => handleBranchSelectChange(e.target.value)}
+              className="select input mt-1 font-medium text-slate-800 dark:text-slate-100"
+            >
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} ({b.id === "main" ? "Primary Location" : b.id})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="edit-branch-name-input" className="label font-bold">
+              New Branch Name
+            </label>
+            <input
+              id="edit-branch-name-input"
+              type="text"
+              required
+              autoFocus
+              placeholder="e.g. Joyce Restobar - Timog, Makati Branch"
+              value={editBranchName}
+              onChange={(e) => setEditBranchName(e.target.value)}
+              className="input mt-1"
+            />
+          </div>
+        </form>
+      </Modal>
 
       {/* Reset Database Modal */}
       <Modal
