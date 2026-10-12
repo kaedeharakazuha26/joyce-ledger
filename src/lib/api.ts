@@ -50,3 +50,5 @@ export const exportCsv = (module: ModuleKey, filter: DateFilter, path: string) =
   invoke<number>("export_csv", { module, filter, path });
 
 export const backupDatabase = (path: string) => invoke<void>("backup_database", { path });
+
+export const restoreDatabase = (path: string) => invoke<void>("restore_database", { path });

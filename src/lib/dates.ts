@@ -58,6 +58,11 @@ export function thisMonthFilter(): DateFilter {
   return { from: toLocalIsoDate(new Date(now.getFullYear(), now.getMonth(), 1)), to: toLocalIsoDate(now) };
 }
 
+export function thisYearFilter(): DateFilter {
+  const now = new Date();
+  return { from: `${now.getFullYear()}-01-01`, to: toLocalIsoDate(now) };
+}
+
 /** Human description of a filter, e.g. "Today", "All dates", "Oct 1 – Oct 13, 2026". */
 export function describeRange(f: DateFilter): string {
   if (isAllDates(f)) return "All dates";

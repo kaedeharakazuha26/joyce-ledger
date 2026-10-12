@@ -1,4 +1,4 @@
-import { ALL_DATES, describeRange, isAllDates, thisMonthFilter, thisWeekFilter, todayFilter } from "../lib/dates";
+import { ALL_DATES, describeRange, isAllDates, thisMonthFilter, thisWeekFilter, thisYearFilter, todayFilter } from "../lib/dates";
 import type { DateFilter } from "../types/models";
 import { DateInput } from "./DateInput";
 
@@ -15,6 +15,7 @@ export function DateRangeFilter({ idPrefix, value, onChange }: DateRangeFilterPr
     { id: "today", label: "Today", make: todayFilter },
     { id: "week", label: "This week", make: thisWeekFilter },
     { id: "month", label: "This month", make: thisMonthFilter },
+    { id: "year", label: "This year", make: thisYearFilter },
     { id: "all", label: "All dates", make: () => ALL_DATES },
   ];
 

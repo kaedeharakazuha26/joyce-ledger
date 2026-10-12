@@ -201,3 +201,153 @@ export function CategoryBreakdown({ title, items, colorScheme = "brand" }: Categ
     </div>
   );
 }
+
+export interface StaffRankItem {
+  name: string;
+  position: string | null;
+  ldAmount: number;
+  ldQuantity: number;
+  commissionAmount: number;
+  salaryAmount: number;
+  totalPayout: number;
+}
+
+interface StaffRankChartProps {
+  items: StaffRankItem[];
+}
+
+export function StaffRankChart({ items }: StaffRankChartProps) {
+  const activeItems = items.filter((i) => i.totalPayout > 0).sort((a, b) => b.totalPayout - a.totalPayout);
+
+  if (activeItems.length === 0) {
+    return (
+      <div className="card p-6">
+        <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
+          Staff Earnings & Payout Ranking
+        </h3>
+        <p className="mt-8 text-center text-sm text-slate-400">
+          No staff earnings or commission recorded in this period.
+        </p>
+      </div>
+    );
+  }
+
+  const maxPayout = Math.max(...activeItems.map((i) => i.totalPayout), 1);
+  const totalPayoutAll = activeItems.reduce((acc, i) => acc + i.totalPayout, 0);
+
+  return (
+    <div className="card p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-4 dark:border-slate-800">
+        <div>
+          <h3 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+            Staff Earnings & Payout Ranking
+            <span className="rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
+              Highest to Lowest
+            </span>
+          </h3>
+          <p className="mt-0.5 text-xs text-slate-400">
+            Total staff payouts: {formatMoney(totalPayoutAll)}
+          </p>
+        </div>
+        <div className="flex items-center gap-4 text-xs font-medium">
+          <div className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+            <span className="text-slate-600 dark:text-slate-300">LD Comm</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-indigo-500" />
+            <span className="text-slate-600 dark:text-slate-300">Commission</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            <span className="text-slate-600 dark:text-slate-300">Salary</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-4">
+        {activeItems.map((item, idx) => {
+          const rank = idx + 1;
+          const barPercent = Math.max(3, (item.totalPayout / maxPayout) * 100);
+          const percentOfTotal = totalPayoutAll > 0 ? (item.totalPayout / totalPayoutAll) * 100 : 0;
+
+          const ldPercent = item.totalPayout > 0 ? (item.ldAmount / item.totalPayout) * 100 : 0;
+          const commPercent = item.totalPayout > 0 ? (item.commissionAmount / item.totalPayout) * 100 : 0;
+          const salaryPercent = item.totalPayout > 0 ? (item.salaryAmount / item.totalPayout) * 100 : 0;
+
+          const medal =
+            rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `#${rank}`;
+
+          return (
+            <div key={item.name} className="group relative">
+              <div className="flex items-center justify-between text-sm mb-1.5">
+                <div className="flex items-center gap-2.5">
+                  <span
+                    className={`flex h-6 w-6 items-center justify-center rounded-lg text-xs font-bold ${
+                      rank === 1
+                        ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300 ring-1 ring-amber-400"
+                        : rank === 2
+                        ? "bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200"
+                        : rank === 3
+                        ? "bg-amber-800/20 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
+                        : "bg-slate-100 text-slate-500 dark:bg-slate-800/60 dark:text-slate-400"
+                    }`}
+                  >
+                    {medal}
+                  </span>
+                  <div>
+                    <span className="font-bold text-slate-900 dark:text-slate-100">{item.name}</span>
+                    {item.position && (
+                      <span className="ml-2 text-xs text-slate-400 font-normal">
+                        ({item.position})
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 tabular">
+                  <span className="font-extrabold text-slate-900 dark:text-slate-100">
+                    {formatMoney(item.totalPayout)}
+                  </span>
+                  <span className="text-xs font-semibold text-slate-400 w-12 text-right">
+                    {percentOfTotal.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+
+              {/* Stacked Ranked Bar */}
+              <div className="relative flex h-4 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800/80">
+                <div
+                  style={{ width: `${barPercent}%` }}
+                  className="flex h-full overflow-hidden rounded-full transition-all duration-300"
+                >
+                  {ldPercent > 0 && (
+                    <div
+                      style={{ width: `${ldPercent}%` }}
+                      title={`LD Commission: ${formatMoney(item.ldAmount)} (${item.ldQuantity} drinks)`}
+                      className="bg-amber-500 hover:brightness-110 transition"
+                    />
+                  )}
+                  {commPercent > 0 && (
+                    <div
+                      style={{ width: `${commPercent}%` }}
+                      title={`Commission: ${formatMoney(item.commissionAmount)}`}
+                      className="bg-indigo-500 hover:brightness-110 transition"
+                    />
+                  )}
+                  {salaryPercent > 0 && (
+                    <div
+                      style={{ width: `${salaryPercent}%` }}
+                      title={`Salary: ${formatMoney(item.salaryAmount)}`}
+                      className="bg-emerald-500 hover:brightness-110 transition"
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

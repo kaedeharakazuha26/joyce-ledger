@@ -8,6 +8,7 @@ import { ExpensesPage } from "./pages/ExpensesPage";
 import { LdCommissionPage } from "./pages/LdCommissionPage";
 import { SalaryPage } from "./pages/SalaryPage";
 import { SalesPage } from "./pages/SalesPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/commission" element={<CommissionPage />} />
             <Route path="/salary" element={<SalaryPage />} />
             <Route path="/employees" element={<EmployeesPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Routes>

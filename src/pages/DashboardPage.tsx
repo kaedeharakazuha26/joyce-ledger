@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CashFlowChart, CategoryBreakdown, type CategoryBreakdownItem, type DailyDataPoint } from "../components/Charts";
+import {
+  CashFlowChart,
+  CategoryBreakdown,
+  StaffRankChart,
+  type CategoryBreakdownItem,
+  type DailyDataPoint,
+} from "../components/Charts";
 import { DateRangeFilter } from "../components/DateRangeFilter";
 import { PageHeader } from "../components/AppLayout";
 import { employeesApi, recordApi } from "../lib/api";
@@ -236,17 +242,25 @@ export function DashboardPage() {
         title="Dashboard & Reports"
         description="Comprehensive restobar financial overview, visual reports, and staff earnings."
         actions={
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => window.print()}
-            title="Print or save as PDF"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-            </svg>
-            Print Report
-          </button>
+          <div className="flex items-center gap-3">
+            {loading && (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
+                <span className="h-2 w-2 animate-ping rounded-full bg-brand-500" />
+                Loading…
+              </span>
+            )}
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => window.print()}
+              title="Print or save as PDF"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+              Print Report
+            </button>
+          </div>
         }
       />
 
@@ -398,6 +412,11 @@ export function DashboardPage() {
           items={expensesCategories}
           colorScheme="rose"
         />
+      </div>
+
+      {/* Staff Earnings & Payout Ranking Graph */}
+      <div className="mb-6">
+        <StaffRankChart items={staffSummaries} />
       </div>
 
       {/* Staff Payout Summary Table */}

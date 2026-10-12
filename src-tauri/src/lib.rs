@@ -55,6 +55,7 @@ pub fn run() {
             commands::suggestions::add_category,
             commands::export::export_csv,
             commands::export::backup_database,
+            commands::export::restore_database,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Joyce Restobar Ledger");

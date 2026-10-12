@@ -130,6 +130,42 @@ pub fn backup_database(state: State<'_, DbState>, path: String) -> AppResult<()>
     backup_to(&*state.conn()?, &path)
 }
 
+/// Restore the database live using SQLite's online backup API.
+pub fn restore_from(dest_conn: &mut Connection, backup_path: &str) -> AppResult<()> {
+    if backup_path.trim().is_empty() {
+        return Err(AppError::validation("Choose a backup file to restore."));
+    }
+    let p = Path::new(backup_path);
+    if !p.exists() {
+        return Err(AppError::validation("The selected backup file does not exist."));
+    }
+    let src_conn = Connection::open_with_flags(p, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let tables: i64 = src_conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('sales','expenses')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| AppError::validation("The file is not a valid Joyce Restobar Ledger database."))?;
+    if tables == 0 {
+        return Err(AppError::validation("The backup file does not contain ledger tables."));
+    }
+
+    {
+        let backup = rusqlite::backup::Backup::new(&src_conn, dest_conn)?;
+        backup.run_to_completion(10, std::time::Duration::from_millis(100), None)?;
+    }
+
+    crate::db::migrations::run(dest_conn)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn restore_database(state: State<'_, DbState>, path: String) -> AppResult<()> {
+    let mut conn = state.conn()?;
+    restore_from(&mut *conn, &path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +210,26 @@ mod tests {
         let n: i64 = copy.query_row("SELECT COUNT(*) FROM sales", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
         drop(copy);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn restore_copies_data_into_connection() {
+        let mut conn = open_in_memory().unwrap();
+        sales::create(&conn, &SaleInput { category: "Original".into(), amount: 500, date: "2026-10-13".into() }).unwrap();
+
+        let path = std::env::temp_dir().join(format!("joyce_restore_test_{}.db", std::process::id()));
+        let p = path.to_string_lossy().to_string();
+        backup_to(&conn, &p).unwrap();
+
+        sales::create(&conn, &SaleInput { category: "Added Later".into(), amount: 999, date: "2026-10-13".into() }).unwrap();
+        assert_eq!(sales::list(&conn, &DateFilter::default()).unwrap().len(), 2);
+
+        restore_from(&mut conn, &p).unwrap();
+        let rows = sales::list(&conn, &DateFilter::default()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].category, "Original");
+
         let _ = std::fs::remove_file(&path);
     }
 }
