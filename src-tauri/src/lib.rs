@@ -56,6 +56,13 @@ pub fn run() {
             commands::export::export_csv,
             commands::export::backup_database,
             commands::export::restore_database,
+            commands::admin::list_branches,
+            commands::admin::get_active_branch,
+            commands::admin::set_active_branch,
+            commands::admin::create_branch,
+            commands::admin::verify_admin_pin,
+            commands::admin::change_admin_pin,
+            commands::admin::reset_database,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Joyce Restobar Ledger");

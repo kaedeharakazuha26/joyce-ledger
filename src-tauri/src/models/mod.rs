@@ -143,6 +143,14 @@ pub struct EmployeeInput {
     pub position: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Branch {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+}
+
 // ---------- Validation ----------
 
 /// Trim and require non-empty text of reasonable length.

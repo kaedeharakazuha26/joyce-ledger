@@ -84,3 +84,9 @@ export interface EmployeeInput {
 export type ModuleKey = "sales" | "expenses" | "ld_commissions" | "commissions" | "salaries";
 
 export type SuggestionKind = "salesCategory" | "expensesCategory" | "commissionsCategory" | "names";
+
+export interface Branch {
+  id: string;
+  name: string;
+  createdAt: string;
+}

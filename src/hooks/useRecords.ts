@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useBranch } from "../context/BranchContext";
 import { errorMessage, recordApi } from "../lib/api";
 import type { BaseRecord, DateFilter, ModuleKey, Totals } from "../types/models";
 
@@ -10,6 +11,7 @@ export function useRecords<T extends BaseRecord & { quantity?: number }, I>(
   module: ModuleKey,
   filter: DateFilter,
 ) {
+  const { currentBranchId } = useBranch();
   const api = useMemo(() => recordApi<T, I>(module), [module]);
   const [records, setRecords] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
@@ -19,7 +21,7 @@ export function useRecords<T extends BaseRecord & { quantity?: number }, I>(
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      setRecords(await api.list({ from, to }));
+      setRecords(await api.list({ from, to }, currentBranchId));
       setError(null);
     } catch (e) {
       setError(errorMessage(e));
@@ -27,7 +29,7 @@ export function useRecords<T extends BaseRecord & { quantity?: number }, I>(
     } finally {
       setLoading(false);
     }
-  }, [api, from, to]);
+  }, [api, from, to, currentBranchId]);
 
   useEffect(() => {
     void reload();
@@ -35,11 +37,11 @@ export function useRecords<T extends BaseRecord & { quantity?: number }, I>(
 
   const create = useCallback(
     async (input: I) => {
-      const created = await api.create(input);
+      const created = await api.create(input, currentBranchId);
       await reload();
       return created;
     },
-    [api, reload],
+    [api, reload, currentBranchId],
   );
 
   const update = useCallback(
@@ -52,8 +54,8 @@ export function useRecords<T extends BaseRecord & { quantity?: number }, I>(
   );
 
   const remove = useCallback(
-    async (id: number) => {
-      await api.remove(id);
+    async (id: number, pin: string) => {
+      await api.remove(id, pin);
       await reload();
     },
     [api, reload],

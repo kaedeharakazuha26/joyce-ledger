@@ -26,12 +26,17 @@ fn push_row(out: &mut String, fields: &[String]) {
 }
 
 /// Build CSV text for a module. Returns `(csv, row_count)`.
-pub fn build_csv(conn: &Connection, module: &str, filter: &DateFilter) -> AppResult<(String, usize)> {
+pub fn build_csv(
+    conn: &Connection,
+    module: &str,
+    filter: &DateFilter,
+    branch_id: &str,
+) -> AppResult<(String, usize)> {
     let mut out = String::new();
     let count;
     match module {
         "sales" => {
-            let rows = sales::list(conn, filter)?;
+            let rows = sales::list(conn, filter, branch_id)?;
             push_row(&mut out, &["Date".into(), "Category".into(), "Amount".into()]);
             let mut total = 0;
             for r in &rows {
@@ -42,7 +47,7 @@ pub fn build_csv(conn: &Connection, module: &str, filter: &DateFilter) -> AppRes
             count = rows.len();
         }
         "expenses" => {
-            let rows = expenses::list(conn, filter)?;
+            let rows = expenses::list(conn, filter, branch_id)?;
             push_row(&mut out, &["Date".into(), "Category".into(), "Amount".into()]);
             let mut total = 0;
             for r in &rows {
@@ -53,7 +58,7 @@ pub fn build_csv(conn: &Connection, module: &str, filter: &DateFilter) -> AppRes
             count = rows.len();
         }
         "ld_commissions" => {
-            let rows = ld_commissions::list(conn, filter)?;
+            let rows = ld_commissions::list(conn, filter, branch_id)?;
             push_row(&mut out, &["Date".into(), "Name".into(), "Quantity".into(), "Amount".into()]);
             let (mut total, mut qty) = (0, 0);
             for r in &rows {
@@ -68,7 +73,7 @@ pub fn build_csv(conn: &Connection, module: &str, filter: &DateFilter) -> AppRes
             count = rows.len();
         }
         "commissions" => {
-            let rows = commissions::list(conn, filter)?;
+            let rows = commissions::list(conn, filter, branch_id)?;
             push_row(&mut out, &["Date".into(), "Name".into(), "Category".into(), "Amount".into()]);
             let mut total = 0;
             for r in &rows {
@@ -82,7 +87,7 @@ pub fn build_csv(conn: &Connection, module: &str, filter: &DateFilter) -> AppRes
             count = rows.len();
         }
         "salaries" => {
-            let rows = salaries::list(conn, filter)?;
+            let rows = salaries::list(conn, filter, branch_id)?;
             push_row(&mut out, &["Date".into(), "Name".into(), "Amount".into()]);
             let mut total = 0;
             for r in &rows {
@@ -104,8 +109,13 @@ pub fn export_csv(
     module: String,
     filter: Option<DateFilter>,
     path: String,
+    branch: Option<String>,
 ) -> AppResult<usize> {
-    let (csv, count) = build_csv(&*state.conn()?, &module, &filter.unwrap_or_default())?;
+    let branch_id = match branch {
+        Some(b) => b,
+        None => state.active_branch()?,
+    };
+    let (csv, count) = build_csv(&*state.conn()?, &module, &filter.unwrap_or_default(), &branch_id)?;
     // UTF-8 BOM so Excel shows ₱ and accented names correctly.
     std::fs::write(&path, format!("\u{FEFF}{csv}"))?;
     Ok(count)
@@ -175,32 +185,40 @@ mod tests {
     #[test]
     fn csv_escaping_and_totals() {
         let conn = open_in_memory().unwrap();
-        sales::create(&conn, &SaleInput { category: "Food, \"special\"".into(), amount: 123_450, date: "2026-10-13".into() })
-            .unwrap();
-        let (csv, n) = build_csv(&conn, "sales", &DateFilter::default()).unwrap();
+        sales::create(
+            &conn,
+            &SaleInput { category: "Food, \"special\"".into(), amount: 123_450, date: "2026-10-13".into() },
+            "main",
+        )
+        .unwrap();
+        let (csv, n) = build_csv(&conn, "sales", &DateFilter::default(), "main").unwrap();
         assert_eq!(n, 1);
         assert_eq!(
             csv,
             "Date,Category,Amount\r\n2026-10-13,\"Food, \"\"special\"\"\",1234.50\r\nTOTAL,,1234.50\r\n"
         );
-        assert!(build_csv(&conn, "bogus", &DateFilter::default()).is_err());
+        assert!(build_csv(&conn, "bogus", &DateFilter::default(), "main").is_err());
     }
 
     #[test]
     fn ld_csv_has_quantity_total() {
         let conn = open_in_memory().unwrap();
         for q in [2, 3] {
-            ld_commissions::create(&conn, &LdCommissionInput { name: "Ana".into(), quantity: q, amount: 100, date: "2026-10-13".into() })
-                .unwrap();
+            ld_commissions::create(
+                &conn,
+                &LdCommissionInput { name: "Ana".into(), quantity: q, amount: 100, date: "2026-10-13".into() },
+                "main",
+            )
+            .unwrap();
         }
-        let (csv, _) = build_csv(&conn, "ld_commissions", &DateFilter::default()).unwrap();
+        let (csv, _) = build_csv(&conn, "ld_commissions", &DateFilter::default(), "main").unwrap();
         assert!(csv.ends_with("TOTAL,,5,2.00\r\n"));
     }
 
     #[test]
     fn backup_creates_readable_copy() {
         let conn = open_in_memory().unwrap();
-        sales::create(&conn, &SaleInput { category: "Food".into(), amount: 100, date: "2026-10-13".into() })
+        sales::create(&conn, &SaleInput { category: "Food".into(), amount: 100, date: "2026-10-13".into() }, "main")
             .unwrap();
         let path = std::env::temp_dir().join(format!("joyce_backup_test_{}.db", std::process::id()));
         let p = path.to_string_lossy().to_string();
@@ -216,17 +234,17 @@ mod tests {
     #[test]
     fn restore_copies_data_into_connection() {
         let mut conn = open_in_memory().unwrap();
-        sales::create(&conn, &SaleInput { category: "Original".into(), amount: 500, date: "2026-10-13".into() }).unwrap();
+        sales::create(&conn, &SaleInput { category: "Original".into(), amount: 500, date: "2026-10-13".into() }, "main").unwrap();
 
         let path = std::env::temp_dir().join(format!("joyce_restore_test_{}.db", std::process::id()));
         let p = path.to_string_lossy().to_string();
         backup_to(&conn, &p).unwrap();
 
-        sales::create(&conn, &SaleInput { category: "Added Later".into(), amount: 999, date: "2026-10-13".into() }).unwrap();
-        assert_eq!(sales::list(&conn, &DateFilter::default()).unwrap().len(), 2);
+        sales::create(&conn, &SaleInput { category: "Added Later".into(), amount: 999, date: "2026-10-13".into() }, "main").unwrap();
+        assert_eq!(sales::list(&conn, &DateFilter::default(), "main").unwrap().len(), 2);
 
         restore_from(&mut conn, &p).unwrap();
-        let rows = sales::list(&conn, &DateFilter::default()).unwrap();
+        let rows = sales::list(&conn, &DateFilter::default(), "main").unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].category, "Original");
 

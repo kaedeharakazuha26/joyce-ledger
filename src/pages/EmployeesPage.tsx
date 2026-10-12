@@ -5,6 +5,7 @@ import { DataTable, type Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { TextInput } from "../components/TextInput";
 import { useToast } from "../components/Toast";
+import { useBranch } from "../context/BranchContext";
 import { employeesApi, errorMessage } from "../lib/api";
 import type { Employee } from "../types/models";
 
@@ -16,6 +17,7 @@ const columns: Column<Employee>[] = [
 
 export function EmployeesPage() {
   const toast = useToast();
+  const { currentBranchId } = useBranch();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -33,14 +35,14 @@ export function EmployeesPage() {
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      setEmployees(await employeesApi.list());
+      setEmployees(await employeesApi.list(currentBranchId));
       setLoadError(null);
     } catch (e) {
       setLoadError(errorMessage(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentBranchId]);
 
   useEffect(() => {
     void reload();
@@ -81,7 +83,7 @@ export function EmployeesPage() {
         await employeesApi.update(editing.id, input);
         toast.success("Employee updated.");
       } else {
-        await employeesApi.create(input);
+        await employeesApi.create(input, currentBranchId);
         toast.success("Employee added.");
       }
       reset();
@@ -103,11 +105,11 @@ export function EmployeesPage() {
     setTimeout(() => nameRef.current?.focus(), 50);
   };
 
-  const confirmDelete = async () => {
+  const confirmDelete = async (pin: string) => {
     if (!pendingDelete) return;
     setDeleting(true);
     try {
-      await employeesApi.remove(pendingDelete.id);
+      await employeesApi.remove(pendingDelete.id, pin);
       if (editing?.id === pendingDelete.id) reset();
       toast.success("Employee deleted.");
       setPendingDelete(null);

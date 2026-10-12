@@ -32,9 +32,9 @@ fn map_unique(e: rusqlite::Error) -> AppError {
     }
 }
 
-pub fn list(conn: &Connection) -> AppResult<Vec<Employee>> {
-    let mut stmt = conn.prepare(&format!("{SELECT} ORDER BY name COLLATE NOCASE, id"))?;
-    let rows = stmt.query_map([], from_row)?.collect::<Result<Vec<_>, _>>()?;
+pub fn list(conn: &Connection, branch_id: &str) -> AppResult<Vec<Employee>> {
+    let mut stmt = conn.prepare(&format!("{SELECT} WHERE branch_id = ?1 ORDER BY name COLLATE NOCASE, id"))?;
+    let rows = stmt.query_map([branch_id], from_row)?.collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
@@ -44,11 +44,11 @@ pub fn get(conn: &Connection, id: i64) -> AppResult<Employee> {
         .ok_or(AppError::NotFound)
 }
 
-pub fn create(conn: &Connection, input: &EmployeeInput) -> AppResult<Employee> {
+pub fn create(conn: &Connection, input: &EmployeeInput, branch_id: &str) -> AppResult<Employee> {
     let (name, position) = clean(input)?;
     conn.execute(
-        "INSERT INTO employees (name, position) VALUES (?1, ?2)",
-        params![name, position],
+        "INSERT INTO employees (name, position, branch_id) VALUES (?1, ?2, ?3)",
+        params![name, position, branch_id],
     )
     .map_err(map_unique)?;
     get(conn, conn.last_insert_rowid())
@@ -77,13 +77,25 @@ pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn list_employees(state: State<'_, DbState>) -> AppResult<Vec<Employee>> {
-    list(&*state.conn()?)
+pub fn list_employees(state: State<'_, DbState>, branch: Option<String>) -> AppResult<Vec<Employee>> {
+    let branch_id = match branch {
+        Some(b) => b,
+        None => state.active_branch()?,
+    };
+    list(&*state.conn()?, &branch_id)
 }
 
 #[tauri::command]
-pub fn create_employee(state: State<'_, DbState>, input: EmployeeInput) -> AppResult<Employee> {
-    create(&*state.conn()?, &input)
+pub fn create_employee(
+    state: State<'_, DbState>,
+    input: EmployeeInput,
+    branch: Option<String>,
+) -> AppResult<Employee> {
+    let branch_id = match branch {
+        Some(b) => b,
+        None => state.active_branch()?,
+    };
+    create(&*state.conn()?, &input, &branch_id)
 }
 
 #[tauri::command]
@@ -96,8 +108,10 @@ pub fn update_employee(
 }
 
 #[tauri::command]
-pub fn delete_employee(state: State<'_, DbState>, id: i64) -> AppResult<()> {
-    delete(&*state.conn()?, id)
+pub fn delete_employee(state: State<'_, DbState>, id: i64, pin: String) -> AppResult<()> {
+    let conn = state.conn()?;
+    crate::commands::admin::check_pin(&conn, &pin)?;
+    delete(&conn, id)
 }
 
 #[cfg(test)]
@@ -112,12 +126,12 @@ mod tests {
     #[test]
     fn crud() {
         let conn = open_in_memory().unwrap();
-        let ana = create(&conn, &input("  Ana ", Some("Cashier"))).unwrap();
+        let ana = create(&conn, &input("  Ana ", Some("Cashier")), "main").unwrap();
         assert_eq!(ana.name, "Ana");
         assert_eq!(ana.position.as_deref(), Some("Cashier"));
-        create(&conn, &input("ben", Some(" "))).unwrap();
+        create(&conn, &input("ben", Some(" ")), "main").unwrap();
 
-        let all = list(&conn).unwrap();
+        let all = list(&conn, "main").unwrap();
         assert_eq!(all.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["Ana", "ben"]);
         assert_eq!(all[1].position, None);
 
@@ -126,7 +140,7 @@ mod tests {
         assert_eq!(updated.position, None);
 
         delete(&conn, ana.id).unwrap();
-        assert_eq!(list(&conn).unwrap().len(), 1);
+        assert_eq!(list(&conn, "main").unwrap().len(), 1);
         assert!(matches!(delete(&conn, ana.id), Err(AppError::NotFound)));
         assert!(matches!(update(&conn, 999, &input("X", None)), Err(AppError::NotFound)));
     }
@@ -134,9 +148,9 @@ mod tests {
     #[test]
     fn rejects_invalid_and_duplicate() {
         let conn = open_in_memory().unwrap();
-        assert!(matches!(create(&conn, &input("  ", None)), Err(AppError::Validation(_))));
-        create(&conn, &input("Ana", None)).unwrap();
-        let dup = create(&conn, &input("ANA", None));
+        assert!(matches!(create(&conn, &input("  ", None), "main"), Err(AppError::Validation(_))));
+        create(&conn, &input("Ana", None), "main").unwrap();
+        let dup = create(&conn, &input("ANA", None), "main");
         assert!(matches!(dup, Err(AppError::Validation(_))));
     }
 }

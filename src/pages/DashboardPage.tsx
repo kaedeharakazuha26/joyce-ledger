@@ -8,6 +8,7 @@ import {
 } from "../components/Charts";
 import { DateRangeFilter } from "../components/DateRangeFilter";
 import { PageHeader } from "../components/AppLayout";
+import { useBranch } from "../context/BranchContext";
 import { employeesApi, recordApi } from "../lib/api";
 import { describeRange, formatDisplayDate, todayFilter } from "../lib/dates";
 import { formatMoney } from "../lib/money";
@@ -24,6 +25,7 @@ interface StaffSummary {
 }
 
 export function DashboardPage() {
+  const { currentBranchId } = useBranch();
   const [filter, setFilter] = useState<DateFilter>(todayFilter);
   const [loading, setLoading] = useState(true);
 
@@ -38,12 +40,12 @@ export function DashboardPage() {
     setLoading(true);
     try {
       const [s, e, ld, c, sal, emp] = await Promise.all([
-        recordApi<Sale, unknown>("sales").list(filter),
-        recordApi<Expense, unknown>("expenses").list(filter),
-        recordApi<LdCommission, unknown>("ld_commissions").list(filter),
-        recordApi<Commission, unknown>("commissions").list(filter),
-        recordApi<Salary, unknown>("salaries").list(filter),
-        employeesApi.list(),
+        recordApi<Sale, unknown>("sales").list(filter, currentBranchId),
+        recordApi<Expense, unknown>("expenses").list(filter, currentBranchId),
+        recordApi<LdCommission, unknown>("ld_commissions").list(filter, currentBranchId),
+        recordApi<Commission, unknown>("commissions").list(filter, currentBranchId),
+        recordApi<Salary, unknown>("salaries").list(filter, currentBranchId),
+        employeesApi.list(currentBranchId),
       ]);
       setSales(s);
       setExpenses(e);
@@ -56,7 +58,7 @@ export function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, currentBranchId]);
 
   useEffect(() => {
     void loadData();

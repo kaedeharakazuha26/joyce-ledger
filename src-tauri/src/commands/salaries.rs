@@ -10,7 +10,7 @@ use crate::models::{
 
 const SELECT: &str =
     "SELECT id, name, amount, salary_date, created_at, updated_at FROM salaries";
-const RANGE: &str = "(?1 IS NULL OR salary_date >= ?1) AND (?2 IS NULL OR salary_date <= ?2)";
+const RANGE: &str = "(?1 IS NULL OR salary_date >= ?1) AND (?2 IS NULL OR salary_date <= ?2) AND branch_id = ?3";
 
 fn from_row(r: &Row) -> rusqlite::Result<Salary> {
     Ok(Salary {
@@ -31,12 +31,12 @@ fn clean(input: &SalaryInput) -> AppResult<SalaryInput> {
     })
 }
 
-pub fn list(conn: &Connection, filter: &DateFilter) -> AppResult<Vec<Salary>> {
+pub fn list(conn: &Connection, filter: &DateFilter, branch_id: &str) -> AppResult<Vec<Salary>> {
     let (from, to) = validate_filter(filter)?;
     let mut stmt =
         conn.prepare(&format!("{SELECT} WHERE {RANGE} ORDER BY salary_date DESC, id DESC"))?;
     let rows = stmt
-        .query_map(params![from, to], from_row)?
+        .query_map(params![from, to, branch_id], from_row)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
@@ -47,11 +47,11 @@ pub fn get(conn: &Connection, id: i64) -> AppResult<Salary> {
         .ok_or(AppError::NotFound)
 }
 
-pub fn create(conn: &Connection, input: &SalaryInput) -> AppResult<Salary> {
+pub fn create(conn: &Connection, input: &SalaryInput, branch_id: &str) -> AppResult<Salary> {
     let i = clean(input)?;
     conn.execute(
-        "INSERT INTO salaries (name, amount, salary_date) VALUES (?1, ?2, ?3)",
-        params![i.name, i.amount, i.date],
+        "INSERT INTO salaries (name, amount, salary_date, branch_id) VALUES (?1, ?2, ?3, ?4)",
+        params![i.name, i.amount, i.date, branch_id],
     )?;
     get(conn, conn.last_insert_rowid())
 }
@@ -76,11 +76,11 @@ pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
     Ok(())
 }
 
-pub fn totals(conn: &Connection, filter: &DateFilter) -> AppResult<Totals> {
+pub fn totals(conn: &Connection, filter: &DateFilter, branch_id: &str) -> AppResult<Totals> {
     let (from, to) = validate_filter(filter)?;
     Ok(conn.query_row(
         &format!("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM salaries WHERE {RANGE}"),
-        params![from, to],
+        params![from, to, branch_id],
         |r| Ok(Totals { count: r.get(0)?, amount: r.get(1)?, quantity: 0 }),
     )?)
 }
@@ -89,13 +89,26 @@ pub fn totals(conn: &Connection, filter: &DateFilter) -> AppResult<Totals> {
 pub fn list_salaries(
     state: State<'_, DbState>,
     filter: Option<DateFilter>,
+    branch: Option<String>,
 ) -> AppResult<Vec<Salary>> {
-    list(&*state.conn()?, &filter.unwrap_or_default())
+    let branch_id = match branch {
+        Some(b) => b,
+        None => state.active_branch()?,
+    };
+    list(&*state.conn()?, &filter.unwrap_or_default(), &branch_id)
 }
 
 #[tauri::command]
-pub fn create_salaries(state: State<'_, DbState>, input: SalaryInput) -> AppResult<Salary> {
-    create(&*state.conn()?, &input)
+pub fn create_salaries(
+    state: State<'_, DbState>,
+    input: SalaryInput,
+    branch: Option<String>,
+) -> AppResult<Salary> {
+    let branch_id = match branch {
+        Some(b) => b,
+        None => state.active_branch()?,
+    };
+    create(&*state.conn()?, &input, &branch_id)
 }
 
 #[tauri::command]
@@ -108,13 +121,23 @@ pub fn update_salaries(
 }
 
 #[tauri::command]
-pub fn delete_salaries(state: State<'_, DbState>, id: i64) -> AppResult<()> {
-    delete(&*state.conn()?, id)
+pub fn delete_salaries(state: State<'_, DbState>, id: i64, pin: String) -> AppResult<()> {
+    let conn = state.conn()?;
+    crate::commands::admin::check_pin(&conn, &pin)?;
+    delete(&conn, id)
 }
 
 #[tauri::command]
-pub fn totals_salaries(state: State<'_, DbState>, filter: Option<DateFilter>) -> AppResult<Totals> {
-    totals(&*state.conn()?, &filter.unwrap_or_default())
+pub fn totals_salaries(
+    state: State<'_, DbState>,
+    filter: Option<DateFilter>,
+    branch: Option<String>,
+) -> AppResult<Totals> {
+    let branch_id = match branch {
+        Some(b) => b,
+        None => state.active_branch()?,
+    };
+    totals(&*state.conn()?, &filter.unwrap_or_default(), &branch_id)
 }
 
 #[cfg(test)]
@@ -129,26 +152,26 @@ mod tests {
     #[test]
     fn crud_and_filter() {
         let conn = open_in_memory().unwrap();
-        let a = create(&conn, &input("Ana", 500_000, "2026-10-15")).unwrap();
-        create(&conn, &input("Ben", 450_000, "2026-09-30")).unwrap();
+        let a = create(&conn, &input("Ana", 500_000, "2026-10-15"), "main").unwrap();
+        create(&conn, &input("Ben", 450_000, "2026-09-30"), "main").unwrap();
 
         let oct = DateFilter { from: Some("2026-10-01".into()), to: Some("2026-10-31".into()) };
-        assert_eq!(list(&conn, &oct).unwrap().len(), 1);
-        assert_eq!(totals(&conn, &oct).unwrap().amount, 500_000);
+        assert_eq!(list(&conn, &oct, "main").unwrap().len(), 1);
+        assert_eq!(totals(&conn, &oct, "main").unwrap().amount, 500_000);
 
         let u = update(&conn, a.id, &input("Ana", 520_000, "2026-09-30")).unwrap();
         assert_eq!(u.amount, 520_000);
-        assert!(list(&conn, &oct).unwrap().is_empty());
+        assert!(list(&conn, &oct, "main").unwrap().is_empty());
 
         delete(&conn, a.id).unwrap();
-        assert_eq!(list(&conn, &DateFilter::default()).unwrap().len(), 1);
+        assert_eq!(list(&conn, &DateFilter::default(), "main").unwrap().len(), 1);
     }
 
     #[test]
     fn rejects_invalid() {
         let conn = open_in_memory().unwrap();
-        assert!(create(&conn, &input("", 100, "2026-10-13")).is_err());
-        assert!(create(&conn, &input("Ana", 0, "2026-10-13")).is_err());
-        assert!(create(&conn, &input("Ana", 100, "")).is_err());
+        assert!(create(&conn, &input("", 100, "2026-10-13"), "main").is_err());
+        assert!(create(&conn, &input("Ana", 0, "2026-10-13"), "main").is_err());
+        assert!(create(&conn, &input("Ana", 100, ""), "main").is_err());
     }
 }

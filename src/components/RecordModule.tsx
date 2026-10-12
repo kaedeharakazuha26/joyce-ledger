@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
+import { useBranch } from "../context/BranchContext";
 import { addCategory, employeesApi, errorMessage, exportCsv } from "../lib/api";
 import { describeRange, isValidIsoDate, rangeSlug, todayFilter, todayLocal } from "../lib/dates";
 import { centavosToInput, formatMoney, MAX_CENTAVOS, parsePesos } from "../lib/money";
@@ -124,18 +125,19 @@ export function RecordModule<T extends AnyRecord>({
   );
   const suggestions = useSuggestions(kinds);
 
+  const { currentBranchId } = useBranch();
   const hasEmployeeField = useMemo(() => fields.some((f) => f.optionsSource === "employees"), [fields]);
   const [employees, setEmployees] = useState<Employee[]>([]);
 
   const reloadEmployees = useCallback(async () => {
     if (!hasEmployeeField) return;
     try {
-      const list = await employeesApi.list();
+      const list = await employeesApi.list(currentBranchId);
       setEmployees(list);
     } catch {
       // Ignore
     }
-  }, [hasEmployeeField]);
+  }, [hasEmployeeField, currentBranchId]);
 
   useEffect(() => {
     void reloadEmployees();
@@ -207,11 +209,11 @@ export function RecordModule<T extends AnyRecord>({
     }
   };
 
-  const confirmDelete = async () => {
+  const confirmDelete = async (pin: string) => {
     if (!pendingDelete) return;
     setDeleting(true);
     try {
-      await remove(pendingDelete.id);
+      await remove(pendingDelete.id, pin);
       if (editing?.id === pendingDelete.id) cancelEdit();
       toast.success(`${noun} deleted.`);
       setPendingDelete(null);
@@ -230,7 +232,7 @@ export function RecordModule<T extends AnyRecord>({
         filters: [{ name: "CSV", extensions: ["csv"] }],
       });
       if (!path) return;
-      const n = await exportCsv(module, filter, path);
+      const n = await exportCsv(module, filter, path, currentBranchId);
       toast.success(`Exported ${n} ${n === 1 ? "row" : "rows"} to CSV.`);
     } catch (err) {
       toast.error(`Export failed: ${errorMessage(err)}`);

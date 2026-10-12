@@ -9,7 +9,7 @@ use crate::models::{
 };
 
 const SELECT: &str = "SELECT id, category, amount, sale_date, created_at, updated_at FROM sales";
-const RANGE: &str = "(?1 IS NULL OR sale_date >= ?1) AND (?2 IS NULL OR sale_date <= ?2)";
+const RANGE: &str = "(?1 IS NULL OR sale_date >= ?1) AND (?2 IS NULL OR sale_date <= ?2) AND branch_id = ?3";
 
 fn from_row(r: &Row) -> rusqlite::Result<Sale> {
     Ok(Sale {
@@ -30,12 +30,12 @@ fn clean(input: &SaleInput) -> AppResult<SaleInput> {
     })
 }
 
-pub fn list(conn: &Connection, filter: &DateFilter) -> AppResult<Vec<Sale>> {
+pub fn list(conn: &Connection, filter: &DateFilter, branch_id: &str) -> AppResult<Vec<Sale>> {
     let (from, to) = validate_filter(filter)?;
     let mut stmt =
         conn.prepare(&format!("{SELECT} WHERE {RANGE} ORDER BY sale_date DESC, id DESC"))?;
     let rows = stmt
-        .query_map(params![from, to], from_row)?
+        .query_map(params![from, to, branch_id], from_row)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
@@ -46,11 +46,11 @@ pub fn get(conn: &Connection, id: i64) -> AppResult<Sale> {
         .ok_or(AppError::NotFound)
 }
 
-pub fn create(conn: &Connection, input: &SaleInput) -> AppResult<Sale> {
+pub fn create(conn: &Connection, input: &SaleInput, branch_id: &str) -> AppResult<Sale> {
     let i = clean(input)?;
     conn.execute(
-        "INSERT INTO sales (category, amount, sale_date) VALUES (?1, ?2, ?3)",
-        params![i.category, i.amount, i.date],
+        "INSERT INTO sales (category, amount, sale_date, branch_id) VALUES (?1, ?2, ?3, ?4)",
+        params![i.category, i.amount, i.date, branch_id],
     )?;
     get(conn, conn.last_insert_rowid())
 }
@@ -75,23 +75,39 @@ pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
     Ok(())
 }
 
-pub fn totals(conn: &Connection, filter: &DateFilter) -> AppResult<Totals> {
+pub fn totals(conn: &Connection, filter: &DateFilter, branch_id: &str) -> AppResult<Totals> {
     let (from, to) = validate_filter(filter)?;
     Ok(conn.query_row(
         &format!("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM sales WHERE {RANGE}"),
-        params![from, to],
+        params![from, to, branch_id],
         |r| Ok(Totals { count: r.get(0)?, amount: r.get(1)?, quantity: 0 }),
     )?)
 }
 
 #[tauri::command]
-pub fn list_sales(state: State<'_, DbState>, filter: Option<DateFilter>) -> AppResult<Vec<Sale>> {
-    list(&*state.conn()?, &filter.unwrap_or_default())
+pub fn list_sales(
+    state: State<'_, DbState>,
+    filter: Option<DateFilter>,
+    branch: Option<String>,
+) -> AppResult<Vec<Sale>> {
+    let branch_id = match branch {
+        Some(b) => b,
+        None => state.active_branch()?,
+    };
+    list(&*state.conn()?, &filter.unwrap_or_default(), &branch_id)
 }
 
 #[tauri::command]
-pub fn create_sales(state: State<'_, DbState>, input: SaleInput) -> AppResult<Sale> {
-    create(&*state.conn()?, &input)
+pub fn create_sales(
+    state: State<'_, DbState>,
+    input: SaleInput,
+    branch: Option<String>,
+) -> AppResult<Sale> {
+    let branch_id = match branch {
+        Some(b) => b,
+        None => state.active_branch()?,
+    };
+    create(&*state.conn()?, &input, &branch_id)
 }
 
 #[tauri::command]
@@ -100,13 +116,23 @@ pub fn update_sales(state: State<'_, DbState>, id: i64, input: SaleInput) -> App
 }
 
 #[tauri::command]
-pub fn delete_sales(state: State<'_, DbState>, id: i64) -> AppResult<()> {
-    delete(&*state.conn()?, id)
+pub fn delete_sales(state: State<'_, DbState>, id: i64, pin: String) -> AppResult<()> {
+    let conn = state.conn()?;
+    crate::commands::admin::check_pin(&conn, &pin)?;
+    delete(&conn, id)
 }
 
 #[tauri::command]
-pub fn totals_sales(state: State<'_, DbState>, filter: Option<DateFilter>) -> AppResult<Totals> {
-    totals(&*state.conn()?, &filter.unwrap_or_default())
+pub fn totals_sales(
+    state: State<'_, DbState>,
+    filter: Option<DateFilter>,
+    branch: Option<String>,
+) -> AppResult<Totals> {
+    let branch_id = match branch {
+        Some(b) => b,
+        None => state.active_branch()?,
+    };
+    totals(&*state.conn()?, &filter.unwrap_or_default(), &branch_id)
 }
 
 #[cfg(test)]
@@ -125,27 +151,34 @@ mod tests {
     #[test]
     fn crud_and_filter() {
         let conn = open_in_memory().unwrap();
-        let a = create(&conn, &input(" Food ", 12_345, "2026-10-12")).unwrap();
+        let a = create(&conn, &input(" Food ", 12_345, "2026-10-12"), "main").unwrap();
         assert_eq!(a.category, "Food");
-        create(&conn, &input("Drinks", 50_000, "2026-10-13")).unwrap();
-        create(&conn, &input("Drinks", 1_000, "2026-10-13")).unwrap();
+        create(&conn, &input("Drinks", 50_000, "2026-10-13"), "main").unwrap();
+        create(&conn, &input("Drinks", 1_000, "2026-10-13"), "main").unwrap();
 
-        let all = list(&conn, &DateFilter::default()).unwrap();
+        // Separate branch data
+        create(&conn, &input("Beer", 20_000, "2026-10-13"), "branch_2").unwrap();
+
+        let all = list(&conn, &DateFilter::default(), "main").unwrap();
         assert_eq!(all.len(), 3);
         assert_eq!(all[0].date, "2026-10-13");
         assert!(all[0].id > all[1].id, "same date sorted by id desc");
         assert_eq!(all[2].id, a.id);
 
+        let branch2_sales = list(&conn, &DateFilter::default(), "branch_2").unwrap();
+        assert_eq!(branch2_sales.len(), 1);
+        assert_eq!(branch2_sales[0].category, "Beer");
+
         let today = range("2026-10-13", "2026-10-13");
-        assert_eq!(list(&conn, &today).unwrap().len(), 2);
+        assert_eq!(list(&conn, &today, "main").unwrap().len(), 2);
         assert_eq!(
-            totals(&conn, &today).unwrap(),
+            totals(&conn, &today, "main").unwrap(),
             Totals { count: 2, amount: 51_000, quantity: 0 }
         );
 
         let u = update(&conn, a.id, &input("Food", 99, "2026-10-13")).unwrap();
         assert_eq!((u.amount, u.date.as_str()), (99, "2026-10-13"));
-        assert_eq!(list(&conn, &today).unwrap().len(), 3);
+        assert_eq!(list(&conn, &today, "main").unwrap().len(), 3);
 
         delete(&conn, a.id).unwrap();
         assert!(matches!(get(&conn, a.id), Err(AppError::NotFound)));
@@ -155,9 +188,9 @@ mod tests {
     #[test]
     fn rejects_invalid() {
         let conn = open_in_memory().unwrap();
-        assert!(create(&conn, &input("", 100, "2026-10-13")).is_err());
-        assert!(create(&conn, &input("Food", 0, "2026-10-13")).is_err());
-        assert!(create(&conn, &input("Food", 100, "13/10/2026")).is_err());
-        assert!(list(&conn, &range("2026-10-14", "2026-10-13")).is_err());
+        assert!(create(&conn, &input("", 100, "2026-10-13"), "main").is_err());
+        assert!(create(&conn, &input("Food", 0, "2026-10-13"), "main").is_err());
+        assert!(create(&conn, &input("Food", 100, "13/10/2026"), "main").is_err());
+        assert!(list(&conn, &range("2026-10-14", "2026-10-13"), "main").is_err());
     }
 }

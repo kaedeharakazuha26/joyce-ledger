@@ -101,6 +101,95 @@ const MIGRATIONS: &[&str] = &[
       ('commissions', 'Service'),
       ('commissions', 'Others');
     "#,
+    // v3: branches, app_settings, and branch-scoped data
+    r#"
+    CREATE TABLE IF NOT EXISTS branches (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+
+    INSERT OR IGNORE INTO branches (id, name) VALUES
+      ('main', 'Main Branch'),
+      ('branch_2', 'Branch 2');
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key         TEXT PRIMARY KEY,
+      value       TEXT NOT NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+
+    INSERT OR IGNORE INTO app_settings (key, value) VALUES
+      ('admin_pin', '0000'),
+      ('active_branch', 'main');
+
+    -- Add branch_id column to transaction tables
+    ALTER TABLE sales ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main';
+    ALTER TABLE expenses ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main';
+    ALTER TABLE ld_commissions ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main';
+    ALTER TABLE commissions ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main';
+    ALTER TABLE salaries ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main';
+
+    -- Recreate employees with branch_id and scoped uniqueness
+    CREATE TABLE IF NOT EXISTS employees_v3 (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL COLLATE NOCASE,
+      position    TEXT,
+      branch_id   TEXT    NOT NULL DEFAULT 'main',
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+      UNIQUE(name COLLATE NOCASE, branch_id)
+    );
+    INSERT OR IGNORE INTO employees_v3 (id, name, position, branch_id, created_at)
+      SELECT id, name, position, 'main', created_at FROM employees;
+    DROP TABLE employees;
+    ALTER TABLE employees_v3 RENAME TO employees;
+
+    -- Recreate categories with branch_id and scoped uniqueness
+    CREATE TABLE IF NOT EXISTS categories_v3 (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind        TEXT    NOT NULL,
+      name        TEXT    NOT NULL,
+      branch_id   TEXT    NOT NULL DEFAULT 'main',
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+      UNIQUE(kind, name COLLATE NOCASE, branch_id)
+    );
+    INSERT OR IGNORE INTO categories_v3 (id, kind, name, branch_id, created_at)
+      SELECT id, kind, name, 'main', created_at FROM categories;
+    DROP TABLE categories;
+    ALTER TABLE categories_v3 RENAME TO categories;
+
+    -- Seed Branch 2 categories with default restobar categories
+    INSERT OR IGNORE INTO categories (kind, name, branch_id) VALUES
+      ('sales', 'Food', 'branch_2'),
+      ('sales', 'Drinks', 'branch_2'),
+      ('sales', 'Beer', 'branch_2'),
+      ('sales', 'Liquor', 'branch_2'),
+      ('sales', 'Cocktails', 'branch_2'),
+      ('sales', 'Cigarettes', 'branch_2'),
+      ('sales', 'Others', 'branch_2'),
+      ('expenses', 'Kitchen Supplies', 'branch_2'),
+      ('expenses', 'Meat & Seafood', 'branch_2'),
+      ('expenses', 'Produce & Groceries', 'branch_2'),
+      ('expenses', 'Beverages & Ice', 'branch_2'),
+      ('expenses', 'Gas & LPG', 'branch_2'),
+      ('expenses', 'Utilities', 'branch_2'),
+      ('expenses', 'Maintenance', 'branch_2'),
+      ('expenses', 'Packaging', 'branch_2'),
+      ('expenses', 'Others', 'branch_2'),
+      ('commissions', 'Bottle', 'branch_2'),
+      ('commissions', 'Table', 'branch_2'),
+      ('commissions', 'VIP', 'branch_2'),
+      ('commissions', 'Service', 'branch_2'),
+      ('commissions', 'Others', 'branch_2');
+
+    CREATE INDEX IF NOT EXISTS idx_sales_branch        ON sales(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_expenses_branch     ON expenses(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_ld_branch           ON ld_commissions(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_commissions_branch  ON commissions(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_salaries_branch     ON salaries(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_employees_branch    ON employees(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_categories_branch   ON categories(branch_id);
+    "#,
 ];
 
 /// Latest schema version known to this build.
@@ -142,11 +231,11 @@ mod tests {
         let tables: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
-                 ('sales','expenses','ld_commissions','commissions','salaries','employees','categories')",
+                 ('sales','expenses','ld_commissions','commissions','salaries','employees','categories','branches','app_settings')",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables, 7);
+        assert_eq!(tables, 9);
     }
 }

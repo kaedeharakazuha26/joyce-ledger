@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod commissions;
 pub mod employees;
 pub mod expenses;

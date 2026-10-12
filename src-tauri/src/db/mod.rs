@@ -8,15 +8,39 @@ use rusqlite::Connection;
 use crate::error::{AppError, AppResult};
 
 /// Shared database handle managed by Tauri.
-pub struct DbState(pub Mutex<Connection>);
+pub struct DbState {
+    pub conn: Mutex<Connection>,
+    pub active_branch: Mutex<String>,
+}
 
 impl DbState {
     pub fn new(conn: Connection) -> Self {
-        Self(Mutex::new(conn))
+        let active = conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'active_branch'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap_or_else(|_| "main".to_string());
+        Self {
+            conn: Mutex::new(conn),
+            active_branch: Mutex::new(active),
+        }
     }
 
     pub fn conn(&self) -> AppResult<MutexGuard<'_, Connection>> {
-        self.0.lock().map_err(|_| AppError::Lock)
+        self.conn.lock().map_err(|_| AppError::Lock)
+    }
+
+    pub fn active_branch(&self) -> AppResult<String> {
+        let b = self.active_branch.lock().map_err(|_| AppError::Lock)?;
+        Ok(b.clone())
+    }
+
+    pub fn set_active_branch(&self, branch_id: &str) -> AppResult<()> {
+        let mut b = self.active_branch.lock().map_err(|_| AppError::Lock)?;
+        *b = branch_id.to_string();
+        Ok(())
     }
 }
 
