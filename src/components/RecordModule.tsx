@@ -26,7 +26,7 @@ export interface FieldDef {
   placeholder?: string;
 }
 
-type AnyRecord = BaseRecord & { quantity?: number } & Record<string, unknown>;
+type AnyRecord = BaseRecord & { quantity?: number };
 type Values = Record<string, string>;
 
 interface RecordModuleProps<T extends AnyRecord> {
@@ -50,7 +50,7 @@ function blankValues(fields: FieldDef[]): Values {
 function valuesFromRecord(fields: FieldDef[], row: AnyRecord): Values {
   return Object.fromEntries(
     fields.map((f) => {
-      const v = row[f.key];
+      const v = (row as unknown as Record<string, unknown>)[f.key];
       if (f.type === "money") return [f.key, centavosToInput(Number(v))];
       return [f.key, v == null ? "" : String(v)];
     }),

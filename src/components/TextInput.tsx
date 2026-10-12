@@ -11,7 +11,7 @@ interface TextInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "on
 }
 
 export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(function TextInput(
-  { id, label, value, onChange, error, suggestions, ...rest },
+  { id, label, value, onChange, error, suggestions, className, ...rest },
   ref,
 ) {
   const listId = suggestions && suggestions.length > 0 ? `${id}-suggestions` : undefined;
@@ -25,7 +25,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(function T
         id={id}
         type="text"
         autoComplete="off"
-        className={`input ${error ? "input-error" : ""}`}
+        className={`input ${className ?? ""} ${error ? "input-error" : ""}`}
         value={value}
         list={listId}
         aria-invalid={!!error}

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 
@@ -17,7 +18,7 @@ export function AppLayout() {
 interface PageHeaderProps {
   title: string;
   description: string;
-  actions?: React.ReactNode;
+  actions?: ReactNode;
 }
 
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
