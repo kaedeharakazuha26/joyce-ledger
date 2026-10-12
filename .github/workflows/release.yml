@@ -55,6 +55,6 @@ jobs:
           tagName: v__VERSION__
           releaseName: "Joyce Restobar Ledger v__VERSION__"
           releaseBody: "Automated multi-platform release installer for Joyce Restobar Ledger."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
