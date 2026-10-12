@@ -68,6 +68,39 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_commissions_date  ON commissions(commission_date);
     CREATE INDEX idx_salaries_date     ON salaries(salary_date);
     "#,
+    // v2: categories table with defaults
+    r#"
+    CREATE TABLE categories (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind        TEXT    NOT NULL,
+      name        TEXT    NOT NULL,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+      UNIQUE(kind, name COLLATE NOCASE)
+    );
+
+    INSERT OR IGNORE INTO categories (kind, name) VALUES
+      ('sales', 'Food'),
+      ('sales', 'Drinks'),
+      ('sales', 'Beer'),
+      ('sales', 'Liquor'),
+      ('sales', 'Cocktails'),
+      ('sales', 'Cigarettes'),
+      ('sales', 'Others'),
+      ('expenses', 'Kitchen Supplies'),
+      ('expenses', 'Meat & Seafood'),
+      ('expenses', 'Produce & Groceries'),
+      ('expenses', 'Beverages & Ice'),
+      ('expenses', 'Gas & LPG'),
+      ('expenses', 'Utilities'),
+      ('expenses', 'Maintenance'),
+      ('expenses', 'Packaging'),
+      ('expenses', 'Others'),
+      ('commissions', 'Bottle'),
+      ('commissions', 'Table'),
+      ('commissions', 'VIP'),
+      ('commissions', 'Service'),
+      ('commissions', 'Others');
+    "#,
 ];
 
 /// Latest schema version known to this build.
@@ -109,11 +142,11 @@ mod tests {
         let tables: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
-                 ('sales','expenses','ld_commissions','commissions','salaries','employees')",
+                 ('sales','expenses','ld_commissions','commissions','salaries','employees','categories')",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables, 6);
+        assert_eq!(tables, 7);
     }
 }

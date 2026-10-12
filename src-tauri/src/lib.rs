@@ -52,6 +52,7 @@ pub fn run() {
             commands::salaries::delete_salaries,
             commands::salaries::totals_salaries,
             commands::suggestions::get_suggestions,
+            commands::suggestions::add_category,
             commands::export::export_csv,
             commands::export::backup_database,
         ])

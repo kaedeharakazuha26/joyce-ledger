@@ -43,6 +43,8 @@ export const employeesApi = {
 
 export const getSuggestions = (kind: SuggestionKind) => invoke<string[]>("get_suggestions", { kind });
 
+export const addCategory = (kind: string, name: string) => invoke<string>("add_category", { kind, name });
+
 /** Writes a CSV file; returns the number of rows written. */
 export const exportCsv = (module: ModuleKey, filter: DateFilter, path: string) =>
   invoke<number>("export_csv", { module, filter, path });

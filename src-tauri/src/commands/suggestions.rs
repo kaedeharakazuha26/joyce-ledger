@@ -10,13 +10,19 @@ use crate::error::{AppError, AppResult};
 fn sql_for(kind: &str) -> AppResult<&'static str> {
     Ok(match kind {
         "salesCategory" => {
-            "SELECT DISTINCT category FROM sales ORDER BY category COLLATE NOCASE"
+            "SELECT name FROM categories WHERE kind = 'sales'
+             UNION SELECT category FROM sales
+             ORDER BY 1 COLLATE NOCASE"
         }
         "expensesCategory" => {
-            "SELECT DISTINCT category FROM expenses ORDER BY category COLLATE NOCASE"
+            "SELECT name FROM categories WHERE kind = 'expenses'
+             UNION SELECT category FROM expenses
+             ORDER BY 1 COLLATE NOCASE"
         }
         "commissionsCategory" => {
-            "SELECT DISTINCT category FROM commissions ORDER BY category COLLATE NOCASE"
+            "SELECT name FROM categories WHERE kind = 'commissions'
+             UNION SELECT category FROM commissions
+             ORDER BY 1 COLLATE NOCASE"
         }
         "names" => {
             "SELECT name FROM employees
@@ -42,9 +48,29 @@ pub fn suggestions(conn: &Connection, kind: &str) -> AppResult<Vec<String>> {
     Ok(out)
 }
 
+pub fn add(conn: &Connection, kind: &str, name: &str) -> AppResult<String> {
+    let trimmed = crate::models::require_text("Category", name)?;
+    let valid_kind = match kind {
+        "salesCategory" | "sales" => "sales",
+        "expensesCategory" | "expenses" => "expenses",
+        "commissionsCategory" | "commissions" => "commissions",
+        other => return Err(AppError::validation(format!("Invalid category kind: {other}"))),
+    };
+    conn.execute(
+        "INSERT OR IGNORE INTO categories (kind, name) VALUES (?1, ?2)",
+        rusqlite::params![valid_kind, trimmed],
+    )?;
+    Ok(trimmed)
+}
+
 #[tauri::command]
 pub fn get_suggestions(state: State<'_, DbState>, kind: String) -> AppResult<Vec<String>> {
     suggestions(&*state.conn()?, &kind)
+}
+
+#[tauri::command]
+pub fn add_category(state: State<'_, DbState>, kind: String, name: String) -> AppResult<String> {
+    add(&*state.conn()?, &kind, &name)
 }
 
 #[cfg(test)]
@@ -57,14 +83,13 @@ mod tests {
     #[test]
     fn gathers_distinct_values() {
         let conn = open_in_memory().unwrap();
-        for c in ["Food", "drinks", "food"] {
-            sales::create(&conn, &SaleInput { category: c.into(), amount: 1, date: "2026-10-13".into() })
-                .unwrap();
-        }
+        add(&conn, "sales", "New Special Combo").unwrap();
+        sales::create(&conn, &SaleInput { category: "Cocktails".into(), amount: 1, date: "2026-10-13".into() })
+            .unwrap();
         let cats = suggestions(&conn, "salesCategory").unwrap();
-        assert_eq!(cats.len(), 2);
-        assert_eq!(cats[0], "drinks");
-        assert!(cats[1].eq_ignore_ascii_case("food"));
+        assert!(cats.contains(&"Food".to_string()));
+        assert!(cats.contains(&"New Special Combo".to_string()));
+        assert!(cats.contains(&"Cocktails".to_string()));
 
         employees::create(&conn, &EmployeeInput { name: "Ana".into(), position: None }).unwrap();
         salaries::create(&conn, &SalaryInput { name: "Carl".into(), amount: 1, date: "2026-10-13".into() })
