@@ -137,7 +137,7 @@ export function ConfirmDialog({
                   setPin(e.target.value);
                   if (pinError) setPinError(null);
                 }}
-                className={`input-text pr-10 font-mono tracking-widest ${
+                className={`input pr-10 font-mono tracking-widest ${
                   pinError ? "border-rose-500 focus:border-rose-500 focus:ring-rose-500" : ""
                 }`}
                 disabled={busy || checkingPin}

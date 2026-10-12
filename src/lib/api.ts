@@ -76,3 +76,6 @@ export const changeAdminPin = (oldPin: string, newPin: string) =>
 
 export const resetDatabase = (branchId: string, pin: string, resetType: string) =>
   invoke<void>("reset_database", { branchId, pin, resetType });
+
+export const deleteBranch = (branchId: string, pin: string) =>
+  invoke<void>("delete_branch", { branchId, pin });

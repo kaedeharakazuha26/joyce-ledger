@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import {
   createBranch as apiCreateBranch,
+  deleteBranch as apiDeleteBranch,
   getActiveBranch,
   listBranches,
   setActiveBranch as apiSetActiveBranch,
@@ -14,6 +15,7 @@ interface BranchContextValue {
   loading: boolean;
   switchBranch: (branchId: string) => Promise<void>;
   createBranch: (name: string) => Promise<Branch>;
+  deleteBranch: (branchId: string, pin: string) => Promise<void>;
   refreshBranches: () => Promise<void>;
 }
 
@@ -69,6 +71,22 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
     [refreshBranches, switchBranch],
   );
 
+  const deleteBranch = useCallback(
+    async (branchId: string, pin: string) => {
+      try {
+        await apiDeleteBranch(branchId, pin);
+        if (currentBranchId === branchId) {
+          setCurrentBranchId("main");
+        }
+        await refreshBranches();
+      } catch (e) {
+        console.error("Failed to delete branch", e);
+        throw e;
+      }
+    },
+    [currentBranchId, refreshBranches],
+  );
+
   const currentBranch = branches.find((b) => b.id === currentBranchId) || branches[0];
 
   return (
@@ -80,6 +98,7 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
         loading,
         switchBranch,
         createBranch,
+        deleteBranch,
         refreshBranches,
       }}
     >

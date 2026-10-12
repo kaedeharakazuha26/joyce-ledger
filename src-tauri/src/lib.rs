@@ -63,6 +63,7 @@ pub fn run() {
             commands::admin::verify_admin_pin,
             commands::admin::change_admin_pin,
             commands::admin::reset_database,
+            commands::admin::delete_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Joyce Restobar Ledger");

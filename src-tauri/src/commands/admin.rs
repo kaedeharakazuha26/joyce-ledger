@@ -193,6 +193,55 @@ pub fn reset_database(
     Ok(())
 }
 
+#[tauri::command]
+pub fn delete_branch(
+    state: State<'_, DbState>,
+    branch_id: String,
+    pin: String,
+) -> AppResult<()> {
+    let conn = state.conn()?;
+    check_pin(&conn, &pin)?;
+
+    if branch_id == "main" {
+        return Err(AppError::validation("The primary Main Branch cannot be deleted."));
+    }
+
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM branches WHERE id = ?1",
+        params![branch_id],
+        |r| r.get(0),
+    )?;
+    if exists == 0 {
+        return Err(AppError::validation("The specified branch does not exist."));
+    }
+
+    let tx = conn.unchecked_transaction()?;
+
+    tx.execute("DELETE FROM sales WHERE branch_id = ?1", params![branch_id])?;
+    tx.execute("DELETE FROM expenses WHERE branch_id = ?1", params![branch_id])?;
+    tx.execute("DELETE FROM ld_commissions WHERE branch_id = ?1", params![branch_id])?;
+    tx.execute("DELETE FROM commissions WHERE branch_id = ?1", params![branch_id])?;
+    tx.execute("DELETE FROM salaries WHERE branch_id = ?1", params![branch_id])?;
+    tx.execute("DELETE FROM employees WHERE branch_id = ?1", params![branch_id])?;
+    tx.execute("DELETE FROM categories WHERE branch_id = ?1", params![branch_id])?;
+    tx.execute("DELETE FROM branches WHERE id = ?1", params![branch_id])?;
+
+    tx.commit()?;
+
+    // If currently on the deleted branch, switch back to 'main'
+    if let Ok(current) = state.active_branch() {
+        if current == branch_id {
+            let _ = conn.execute(
+                "UPDATE app_settings SET value = 'main', updated_at = datetime('now','localtime') WHERE key = 'active_branch'",
+                [],
+            );
+            let _ = state.set_active_branch("main");
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

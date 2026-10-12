@@ -264,7 +264,7 @@ export function Sidebar() {
               placeholder="e.g. Branch 2, Makati Branch, Taguig Branch"
               value={newBranchName}
               onChange={(e) => setNewBranchName(e.target.value)}
-              className="input-text mt-1"
+              className="input mt-1"
             />
           </div>
         </form>
