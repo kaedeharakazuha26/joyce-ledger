@@ -5,8 +5,26 @@ import { formatMoney } from "../lib/money";
 import type { Commission } from "../types/models";
 
 const fields: FieldDef[] = [
-  { key: "name", label: "Name", type: "text", suggestions: "names", placeholder: "Employee name" },
-  { key: "category", label: "Category", type: "text", suggestions: "commissionsCategory", placeholder: "e.g. Bottle, Table" },
+  {
+    key: "name",
+    label: "Name",
+    type: "select",
+    optionsSource: "employees",
+    placeholder: "Select employee…",
+    allowAdd: true,
+    addTitle: "Add New Employee",
+    addPlaceholder: "Employee full name",
+  },
+  {
+    key: "category",
+    label: "Category",
+    type: "select",
+    suggestions: "commissionsCategory",
+    placeholder: "Select category…",
+    allowAdd: true,
+    addTitle: "Add New Commission Category",
+    addPlaceholder: "e.g. Bottle, VIP Table, Service",
+  },
   { key: "amount", label: "Amount", type: "money" },
   { key: "date", label: "Date", type: "date" },
 ];

@@ -5,7 +5,16 @@ import { formatMoney } from "../lib/money";
 import type { Expense } from "../types/models";
 
 const fields: FieldDef[] = [
-  { key: "category", label: "Category", type: "text", suggestions: "expensesCategory", placeholder: "e.g. Ice, Gas, Supplies" },
+  {
+    key: "category",
+    label: "Category",
+    type: "select",
+    suggestions: "expensesCategory",
+    placeholder: "Select expense category…",
+    allowAdd: true,
+    addTitle: "Add New Expense Category",
+    addPlaceholder: "e.g. Kitchen Supplies, Ice, LPG Gas",
+  },
   { key: "amount", label: "Amount", type: "money" },
   { key: "date", label: "Date", type: "date" },
 ];

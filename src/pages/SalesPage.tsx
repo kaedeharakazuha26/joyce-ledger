@@ -5,7 +5,16 @@ import { formatMoney } from "../lib/money";
 import type { Sale } from "../types/models";
 
 const fields: FieldDef[] = [
-  { key: "category", label: "Category", type: "text", suggestions: "salesCategory", placeholder: "e.g. Food, Drinks" },
+  {
+    key: "category",
+    label: "Category",
+    type: "select",
+    suggestions: "salesCategory",
+    placeholder: "Select sales category…",
+    allowAdd: true,
+    addTitle: "Add New Sales Category",
+    addPlaceholder: "e.g. Cocktails, Special Combos, Beers",
+  },
   { key: "amount", label: "Amount", type: "money" },
   { key: "date", label: "Date", type: "date" },
 ];

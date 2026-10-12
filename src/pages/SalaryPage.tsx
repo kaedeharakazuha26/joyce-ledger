@@ -5,7 +5,16 @@ import { formatMoney } from "../lib/money";
 import type { Salary } from "../types/models";
 
 const fields: FieldDef[] = [
-  { key: "name", label: "Name", type: "text", suggestions: "names", placeholder: "Employee name" },
+  {
+    key: "name",
+    label: "Name",
+    type: "select",
+    optionsSource: "employees",
+    placeholder: "Select employee…",
+    allowAdd: true,
+    addTitle: "Add New Employee",
+    addPlaceholder: "Employee full name",
+  },
   { key: "amount", label: "Amount", type: "money" },
   { key: "date", label: "Date", type: "date" },
 ];

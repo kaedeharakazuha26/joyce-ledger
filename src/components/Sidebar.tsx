@@ -6,6 +6,7 @@ import { todayLocal } from "../lib/dates";
 import { useToast } from "./Toast";
 
 const ICONS: Record<string, string> = {
+  dashboard: "M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10 0a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 14a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1v-5zm10 3a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1v-2z",
   sales: "M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.3 2.3c-.6.6-.2 1.7.7 1.7H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z",
   expenses: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z",
   ld: "M8 21h8m-4-4v4m-5-17h10l-1 7a4 4 0 01-8 0L7 4z",
@@ -15,6 +16,7 @@ const ICONS: Record<string, string> = {
 };
 
 const NAV = [
+  { to: "/dashboard", label: "Dashboard", icon: "dashboard" },
   { to: "/sales", label: "Sales", icon: "sales" },
   { to: "/expenses", label: "Expenses", icon: "expenses" },
   { to: "/ld-commission", label: "LD Commission", icon: "ld" },

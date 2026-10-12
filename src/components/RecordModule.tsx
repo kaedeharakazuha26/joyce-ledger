@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { errorMessage, exportCsv } from "../lib/api";
+import { addCategory, employeesApi, errorMessage, exportCsv } from "../lib/api";
 import { describeRange, isValidIsoDate, rangeSlug, todayFilter, todayLocal } from "../lib/dates";
 import { centavosToInput, formatMoney, MAX_CENTAVOS, parsePesos } from "../lib/money";
 import { useRecords } from "../hooks/useRecords";
 import { useSuggestions } from "../hooks/useSuggestions";
-import type { BaseRecord, DateFilter, ModuleKey, SuggestionKind } from "../types/models";
+import type { BaseRecord, DateFilter, Employee, ModuleKey, SuggestionKind } from "../types/models";
 import { PageHeader } from "./AppLayout";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DataTable, type Column } from "./DataTable";
@@ -13,10 +13,11 @@ import { DateInput } from "./DateInput";
 import { DateRangeFilter } from "./DateRangeFilter";
 import { EmptyState } from "./EmptyState";
 import { MoneyInput } from "./MoneyInput";
+import { SelectWithAdd } from "./SelectWithAdd";
 import { TextInput } from "./TextInput";
 import { useToast } from "./Toast";
 
-export type FieldType = "text" | "money" | "int" | "date";
+export type FieldType = "text" | "money" | "int" | "date" | "select";
 
 export interface FieldDef {
   key: string;
@@ -24,6 +25,10 @@ export interface FieldDef {
   type: FieldType;
   suggestions?: SuggestionKind;
   placeholder?: string;
+  optionsSource?: "suggestions" | "employees";
+  allowAdd?: boolean;
+  addTitle?: string;
+  addPlaceholder?: string;
 }
 
 type AnyRecord = BaseRecord & { quantity?: number };
@@ -65,6 +70,7 @@ function validate(fields: FieldDef[], values: Values) {
     const raw = (values[f.key] ?? "").trim();
     switch (f.type) {
       case "text":
+      case "select":
         if (!raw) errors[f.key] = `${f.label} is required.`;
         else if (raw.length > 120) errors[f.key] = `${f.label} must be 120 characters or fewer.`;
         input[f.key] = raw;
@@ -117,6 +123,23 @@ export function RecordModule<T extends AnyRecord>({
     [fields],
   );
   const suggestions = useSuggestions(kinds);
+
+  const hasEmployeeField = useMemo(() => fields.some((f) => f.optionsSource === "employees"), [fields]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+
+  const reloadEmployees = useCallback(async () => {
+    if (!hasEmployeeField) return;
+    try {
+      const list = await employeesApi.list();
+      setEmployees(list);
+    } catch {
+      // Ignore
+    }
+  }, [hasEmployeeField]);
+
+  useEffect(() => {
+    void reloadEmployees();
+  }, [reloadEmployees]);
 
   const [values, setValues] = useState<Values>(() => blankValues(fields));
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -253,6 +276,48 @@ export function RecordModule<T extends AnyRecord>({
             const common = { id, label: f.label, value: values[f.key] ?? "", onChange: (v: string) => setField(f.key, v), error: errors[f.key] };
             if (f.type === "money") return <MoneyInput key={f.key} ref={ref} {...common} />;
             if (f.type === "date") return <DateInput key={f.key} ref={ref} {...common} />;
+            if (f.type === "select") {
+              const opts =
+                f.optionsSource === "employees"
+                  ? employees.map((e) => ({
+                      label: e.position ? `${e.name} (${e.position})` : e.name,
+                      value: e.name,
+                    }))
+                  : (f.suggestions ? suggestions.values[f.suggestions] ?? [] : []);
+
+              const handleAddOption = async (newVal: string) => {
+                if (f.optionsSource === "employees") {
+                  await employeesApi.create({ name: newVal, position: null });
+                  await reloadEmployees();
+                  toast.success(`Employee "${newVal}" added.`);
+                } else if (f.suggestions) {
+                  await addCategory(f.suggestions, newVal);
+                  await suggestions.refresh();
+                  toast.success(`Category "${newVal}" added.`);
+                }
+              };
+
+              return (
+                <SelectWithAdd
+                  key={f.key}
+                  id={id}
+                  label={f.label}
+                  value={values[f.key] ?? ""}
+                  onChange={(v: string) => setField(f.key, v)}
+                  options={opts}
+                  placeholder={f.placeholder ?? `Select ${f.label.toLowerCase()}…`}
+                  error={errors[f.key]}
+                  onAdd={f.allowAdd ? handleAddOption : undefined}
+                  addTitle={f.addTitle ?? `Add New ${f.label}`}
+                  addPlaceholder={f.addPlaceholder ?? `Enter ${f.label.toLowerCase()} name…`}
+                  emptyNotice={
+                    f.optionsSource === "employees" && employees.length === 0
+                      ? "No staff found. Click + to add an employee."
+                      : undefined
+                  }
+                />
+              );
+            }
             return (
               <TextInput
                 key={f.key}
