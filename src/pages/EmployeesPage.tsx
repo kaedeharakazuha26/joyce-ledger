@@ -130,7 +130,7 @@ export function EmployeesPage() {
     <>
       <PageHeader title="Employees" description="The staff master list. Names here are suggested in LD Commission, Commission and Salary." />
 
-      <form id="employees-form" noValidate onSubmit={handleSubmit} className={`card mb-6 p-6 ${editing ? "ring-2 ring-brand-400" : ""}`}>
+      <form id="employees-form" noValidate onSubmit={handleSubmit} className={`card card-hover mb-6 p-6 transition-all duration-300 ${editing ? "ring-2 ring-amber-400" : ""}`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{editing ? "Edit employee" : "New employee"}</h2>
           {editing && (
@@ -176,7 +176,7 @@ export function EmployeesPage() {
         </div>
       </form>
 
-      <section className="card overflow-hidden">
+      <section className="card card-hover overflow-hidden">
         <div className="flex items-center justify-between gap-4 border-b border-slate-200 p-5 dark:border-slate-800">
           <p className="text-sm font-semibold text-slate-500">
             {employees.length} {employees.length === 1 ? "employee" : "employees"}

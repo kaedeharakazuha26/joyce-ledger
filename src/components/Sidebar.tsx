@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
+import logoImg from "../assets/logo.webp";
 import { useBranch } from "../context/BranchContext";
 import { Modal } from "./Modal";
 import { useToast } from "./Toast";
@@ -27,7 +28,7 @@ const NAV = [
 
 function Icon({ path }: { path: string }) {
   return (
-    <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+    <svg className="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d={path} />
     </svg>
   );
@@ -74,41 +75,53 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 text-slate-300">
-      {/* Brand Header */}
-      <div className="flex items-center gap-3 px-6 pb-4 pt-6">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-300 to-brand-600 text-lg font-black text-slate-900 shadow-lg shadow-brand-500/30">
-          J
+    <aside className="relative flex w-64 shrink-0 flex-col border-r border-amber-900/20 bg-gradient-to-b from-[#0a0c10] via-[#0f121a] to-[#07080c] text-slate-300 shadow-2xl">
+      {/* Brand Header with Logo */}
+      <div className="flex items-center gap-3.5 px-5 pb-5 pt-6">
+        <div className="relative group shrink-0">
+          <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-amber-500/40 via-yellow-400/40 to-amber-600/40 blur-sm opacity-70 group-hover:opacity-100 transition duration-500 animate-pulse-glow" />
+          <img
+            src={logoImg}
+            alt="Joyce Restobar Crest"
+            className="relative h-12 w-12 rounded-xl object-contain bg-black/90 p-0.5 ring-1 ring-amber-500/40 shadow-lg shadow-amber-500/25 transition-transform duration-300 group-hover:scale-105"
+          />
         </div>
-        <div className="leading-tight">
-          <p className="text-base font-bold text-white">Joyce Restobar</p>
-          <p className="text-xs font-medium uppercase tracking-widest text-brand-300/80">Ledger</p>
+        <div className="leading-tight overflow-hidden">
+          <p className="truncate text-base font-extrabold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-300 to-yellow-500">
+            Joyce Restobar
+          </p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-ping" />
+            <p className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80">
+              Ledger OS
+            </p>
+          </div>
         </div>
       </div>
 
       {/* Branch Selector Widget */}
-      <div className="relative px-3 pb-3">
+      <div className="relative px-3.5 pb-4">
         <button
           type="button"
           id="sidebar-branch-select-btn"
           onClick={() => setDropdownOpen(!dropdownOpen)}
-          className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-left transition hover:bg-white/10 hover:border-white/20"
+          className="flex w-full items-center justify-between gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-left transition-all duration-200 hover:bg-amber-500/10 hover:border-amber-500/40 hover:shadow-sm hover:shadow-amber-500/10 active:scale-[0.99]"
         >
           <div className="flex items-center gap-2.5 truncate">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-500/20 text-brand-300">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500/30 to-amber-600/10 text-amber-300 border border-amber-500/30">
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
               </svg>
             </span>
             <div className="truncate leading-tight">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Branch</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-400/70">Current Branch</p>
               <p className="truncate text-sm font-bold text-white">
                 {currentBranch?.name || "Main Branch"}
               </p>
             </div>
           </div>
           <svg
-            className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${dropdownOpen ? "rotate-180" : ""}`}
+            className={`h-4 w-4 shrink-0 text-amber-400/80 transition-transform duration-300 ${dropdownOpen ? "rotate-180" : ""}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -122,8 +135,8 @@ export function Sidebar() {
         {dropdownOpen && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setDropdownOpen(false)} />
-            <div className="absolute left-3 right-3 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl backdrop-blur-md">
-              <div className="px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="absolute left-3.5 right-3.5 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-amber-500/30 bg-slate-950 p-1.5 shadow-2xl backdrop-blur-md animate-pop-in">
+              <div className="px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-amber-400/70">
                 Select Branch
               </div>
               <div className="max-h-48 space-y-1 overflow-y-auto">
@@ -134,15 +147,15 @@ export function Sidebar() {
                       key={b.id}
                       type="button"
                       onClick={() => void handleSelectBranch(b.id)}
-                      className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-semibold transition ${
+                      className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-semibold transition-all duration-150 ${
                         isCurrent
-                          ? "bg-brand-500/20 text-brand-300"
+                          ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
                           : "text-slate-300 hover:bg-white/5 hover:text-white"
                       }`}
                     >
                       <span className="truncate">{b.name}</span>
                       {isCurrent && (
-                        <svg className="h-4 w-4 shrink-0 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <svg className="h-4 w-4 shrink-0 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                         </svg>
                       )}
@@ -158,7 +171,7 @@ export function Sidebar() {
                     setDropdownOpen(false);
                     setAddBranchOpen(true);
                   }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-bold text-brand-400 hover:bg-brand-500/10"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-bold text-amber-400 hover:bg-amber-500/10 transition"
                 >
                   <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -179,24 +192,19 @@ export function Sidebar() {
             to={item.to}
             id={`nav-${item.icon}`}
             className={({ isActive }) =>
-              `group relative flex h-12 items-center gap-3 rounded-xl px-4 text-[15px] font-semibold transition ${
+              `group relative flex h-11 items-center gap-3 rounded-xl px-3.5 text-sm font-semibold transition-all duration-200 ${
                 isActive
-                  ? "bg-white/10 text-white shadow-inner"
+                  ? "bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-transparent text-amber-200 shadow-sm border-l-2 border-amber-400"
                   : "text-slate-400 hover:bg-white/5 hover:text-slate-100"
               }`
             }
           >
             {({ isActive }) => (
               <>
-                <span
-                  className={`absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-brand-400 transition-opacity ${
-                    isActive ? "opacity-100" : "opacity-0"
-                  }`}
-                />
-                <span className={isActive ? "text-brand-300" : ""}>
+                <span className={isActive ? "text-amber-400" : "text-slate-400 group-hover:text-amber-300"}>
                   <Icon path={ICONS[item.icon]} />
                 </span>
-                {item.label}
+                <span className="truncate">{item.label}</span>
               </>
             )}
           </NavLink>
@@ -204,22 +212,24 @@ export function Sidebar() {
       </nav>
 
       {/* Footer / Settings Link */}
-      <div className="space-y-3 p-4 border-t border-white/5">
+      <div className="space-y-3 p-4 border-t border-amber-900/20 bg-black/20">
         <NavLink
           to="/settings"
           id="nav-settings"
           className={({ isActive }) =>
-            `flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition ${
+            `flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-all duration-200 ${
               isActive
-                ? "bg-brand-500 text-white shadow-md shadow-brand-500/25"
-                : "border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                ? "bg-gradient-to-r from-amber-500 via-brand-500 to-amber-600 text-slate-950 font-bold shadow-md shadow-amber-500/25"
+                : "border border-amber-500/20 bg-amber-500/5 text-amber-200 hover:bg-amber-500/10 hover:border-amber-500/40"
             }`
           }
         >
           <Icon path={ICONS.settings} />
           Settings & Database
         </NavLink>
-        <p className="text-center text-[11px] text-slate-500">Offline · Branch data saved locally</p>
+        <p className="text-center text-[10px] text-slate-500 font-medium">
+          Offline Mode · Joyce Restobar
+        </p>
       </div>
 
       {/* Modal to Add New Branch */}

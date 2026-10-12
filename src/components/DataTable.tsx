@@ -44,7 +44,7 @@ export function DataTable<T extends { id: number }>({ idPrefix, columns, rows, e
             return (
               <tr
                 key={row.id}
-                className={`group transition-colors ${editing ? "bg-brand-50 dark:bg-brand-500/10" : "hover:bg-slate-50 dark:hover:bg-slate-800/40"}`}
+                className={`group transition-colors duration-150 ${editing ? "bg-amber-500/15 dark:bg-amber-500/15" : "hover:bg-amber-500/5 dark:hover:bg-amber-500/5"}`}
               >
                 {columns.map((c) => (
                   <td key={c.header} className={`border-b border-slate-100 px-5 py-3.5 dark:border-slate-800/70 ${alignClass(c.align)} ${c.className ?? ""}`}>

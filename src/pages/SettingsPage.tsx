@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import logoImg from "../assets/logo.webp";
 import { PageHeader } from "../components/AppLayout";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Modal } from "../components/Modal";
@@ -469,9 +470,32 @@ export function SettingsPage() {
         </section>
 
         {/* System & Architecture Info */}
-        <section className="card p-6 shadow-sm">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">System Information</h2>
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <section className="card card-hover p-6 shadow-sm border-amber-500/20">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4 dark:border-slate-800">
+            <div className="flex items-center gap-3.5">
+              <div className="relative group shrink-0">
+                <div className="absolute -inset-1 rounded-2xl bg-amber-500/30 blur-sm animate-pulse-glow" />
+                <img
+                  src={logoImg}
+                  alt="Joyce Restobar"
+                  className="relative h-12 w-12 rounded-xl object-contain bg-black/90 p-0.5 ring-1 ring-amber-500/50 shadow-md shadow-amber-500/20"
+                />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                  Joyce Restobar Ledger OS
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Official Offline Desktop Application for Joyce Restobar
+                </p>
+              </div>
+            </div>
+            <span className="badge-gold">
+              v1.0.0 Stable
+            </span>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Application</p>
               <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">Joyce Restobar Ledger</p>
@@ -479,7 +503,7 @@ export function SettingsPage() {
             <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Network & Storage</p>
               <div className="mt-1 flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">100% Offline (SQLite)</span>
               </div>
             </div>

@@ -261,7 +261,7 @@ export function RecordModule<T extends AnyRecord>({
         id={`${module}-form`}
         noValidate
         onSubmit={handleSubmit}
-        className={`card mb-6 p-6 transition ${editing ? "ring-2 ring-brand-400" : ""}`}
+        className={`card card-hover mb-6 p-6 transition-all duration-300 ${editing ? "ring-2 ring-amber-400" : ""}`}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{editing ? `Edit ${noun.toLowerCase()}` : `New ${noun.toLowerCase()}`}</h2>
@@ -346,7 +346,7 @@ export function RecordModule<T extends AnyRecord>({
       </form>
 
       {/* Filter + totals */}
-      <section className="card overflow-hidden">
+      <section className="card card-hover overflow-hidden">
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 p-5 dark:border-slate-800">
           <DateRangeFilter idPrefix={module} value={filter} onChange={setFilter} />
         </div>
@@ -399,7 +399,7 @@ function Stat({ label, value, highlight }: { label: string; value: string; highl
   return (
     <div className="bg-white px-6 py-4 dark:bg-slate-900">
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-      <p className={`tabular mt-1 text-2xl font-extrabold ${highlight ? "text-brand-600 dark:text-brand-300" : ""}`}>{value}</p>
+      <p className={`tabular mt-1 text-2xl font-extrabold ${highlight ? "text-amber-600 dark:text-amber-400" : ""}`}>{value}</p>
     </div>
   );
 }

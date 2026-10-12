@@ -162,7 +162,7 @@ export function CategoryBreakdown({ title, items, colorScheme = "brand" }: Categ
   }
 
   return (
-    <div className="card p-6">
+    <div className="card card-hover p-6">
       <div className="flex items-center justify-between">
         <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">{title}</h3>
         <span className="text-xs font-semibold text-slate-400">{items.length} categories</span>
@@ -236,7 +236,7 @@ export function StaffRankChart({ items }: StaffRankChartProps) {
   const totalPayoutAll = activeItems.reduce((acc, i) => acc + i.totalPayout, 0);
 
   return (
-    <div className="card p-6">
+    <div className="card card-hover p-6">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-4 dark:border-slate-800">
         <div>
           <h3 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
