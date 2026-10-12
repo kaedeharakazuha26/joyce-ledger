@@ -27,13 +27,14 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
   const maxVal = Math.max(...data.map((d) => Math.max(d.sales, d.outflows)), 100);
   const chartHeight = 220;
   const barWidth = Math.max(8, Math.min(32, Math.floor(580 / (data.length * 2.5))));
+  const hoveredItem = hoveredIndex !== null ? data[hoveredIndex] : null;
 
   return (
     <div className="relative">
-      <div className="mb-4 flex items-center justify-between text-xs font-semibold">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs font-semibold">
         <div className="flex items-center gap-5">
           <div className="flex items-center gap-2">
-            <span className="h-3 w-3 rounded-sm bg-brand-500 shadow-sm" />
+            <span className="h-3 w-3 rounded-sm bg-amber-500 shadow-sm" />
             <span className="text-slate-600 dark:text-slate-300">Gross Sales</span>
           </div>
           <div className="flex items-center gap-2">
@@ -41,37 +42,72 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
             <span className="text-slate-600 dark:text-slate-300">Outflows (Expenses + Payouts)</span>
           </div>
         </div>
-        <span className="text-slate-400">Max day: {formatMoney(maxVal)}</span>
+
+        {/* Live Hover Inspector or Peak Single Day */}
+        {hoveredItem ? (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1 font-mono text-xs animate-fade-in">
+            <span className="font-bold text-amber-400">{hoveredItem.displayDate}:</span>
+            <span className="text-slate-300">Sales <strong className="text-amber-300">{formatMoney(hoveredItem.sales)}</strong></span>
+            <span className="text-slate-300">Outflows <strong className="text-rose-400">{formatMoney(hoveredItem.outflows)}</strong></span>
+            <span className="font-bold">
+              Net{" "}
+              <strong className={hoveredItem.net >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                {hoveredItem.net >= 0 ? "+" : ""}
+                {formatMoney(hoveredItem.net)}
+              </strong>
+            </span>
+          </div>
+        ) : (
+          <span className="text-slate-400">Peak day: {formatMoney(maxVal)}</span>
+        )}
       </div>
 
-      <div className="relative h-[240px] overflow-x-auto pb-6 pt-2">
+      <div className="relative h-[250px] overflow-x-auto pb-6 pt-3">
         <div className="flex h-[200px] items-end gap-3 px-2" style={{ minWidth: `${data.length * 48}px` }}>
           {data.map((item, idx) => {
             const salesHeight = Math.max(4, Math.round((item.sales / maxVal) * chartHeight * 0.85));
             const outflowsHeight = Math.max(4, Math.round((item.outflows / maxVal) * chartHeight * 0.85));
+            const highestBar = Math.max(salesHeight, outflowsHeight);
             const isHovered = hoveredIndex === idx;
+
+            // Horizontal alignment clamp so popups at edges don't clip horizontally
+            const horizontalClass =
+              idx === 0
+                ? "left-0"
+                : idx >= data.length - 2
+                ? "right-0"
+                : "left-1/2 -translate-x-1/2";
 
             return (
               <div
                 key={item.date}
-                className="group relative flex flex-1 flex-col items-center justify-end"
+                className="group relative flex flex-1 h-full flex-col items-center justify-end"
                 onMouseEnter={() => setHoveredIndex(idx)}
                 onMouseLeave={() => setHoveredIndex(null)}
               >
-                {/* Tooltip */}
+                {/* Tooltip positioned safely inside chart bounds */}
                 {isHovered && (
-                  <div className="absolute -top-28 z-30 w-44 -translate-y-2 rounded-xl border border-slate-700/50 bg-slate-900/95 p-2.5 text-xs text-white shadow-xl backdrop-blur-md transition">
-                    <p className="font-bold text-slate-200">{item.displayDate}</p>
-                    <div className="mt-1.5 space-y-1">
+                  <div
+                    className={`pointer-events-none absolute z-30 w-48 rounded-xl border border-amber-500/50 bg-slate-950/95 p-2.5 text-xs text-white shadow-2xl backdrop-blur-md transition-all duration-150 animate-pop-in ${horizontalClass}`}
+                    style={{
+                      top: highestBar > 100 ? "4px" : undefined,
+                      bottom: highestBar <= 100 ? `${highestBar + 28}px` : undefined,
+                    }}
+                  >
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-1 mb-1.5">
+                      <p className="font-bold text-amber-300">{item.displayDate}</p>
+                      <span className="text-[10px] text-slate-400">Day #{idx + 1}</span>
+                    </div>
+                    <div className="space-y-1">
                       <div className="flex justify-between">
-                        <span className="text-brand-300">Sales:</span>
-                        <span className="font-semibold">{formatMoney(item.sales)}</span>
+                        <span className="text-amber-200">Total Sales:</span>
+                        <span className="font-semibold text-white">{formatMoney(item.sales)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-rose-300">Outflows:</span>
-                        <span className="font-semibold">{formatMoney(item.outflows)}</span>
+                        <span className="font-semibold text-rose-200">{formatMoney(item.outflows)}</span>
                       </div>
-                      <div className="border-t border-slate-700/80 pt-1 flex justify-between font-bold">
+                      <div className="border-t border-slate-800 pt-1 flex justify-between font-bold">
                         <span className={item.net >= 0 ? "text-emerald-400" : "text-rose-400"}>Net:</span>
                         <span className={item.net >= 0 ? "text-emerald-400" : "text-rose-400"}>
                           {item.net >= 0 ? "+" : ""}
@@ -87,7 +123,7 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
                   {/* Sales bar */}
                   <div
                     style={{ height: `${salesHeight}px`, width: `${barWidth}px` }}
-                    className="rounded-t-md bg-gradient-to-t from-brand-500 to-brand-400 transition-all duration-200 group-hover:brightness-110"
+                    className="rounded-t-md bg-gradient-to-t from-amber-600 via-amber-500 to-amber-400 transition-all duration-200 group-hover:brightness-110"
                   />
                   {/* Outflows bar */}
                   <div

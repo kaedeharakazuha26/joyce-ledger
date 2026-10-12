@@ -104,3 +104,47 @@
     @apply inline-flex items-center gap-1.5 rounded-full border border-amber-300/80 bg-amber-50/80 px-2.5 py-0.5 text-xs font-bold text-amber-900 dark:border-amber-600/40 dark:bg-amber-950/40 dark:text-amber-200;
   }
 }
+
+/* Dedicated Print Engine Styling */
+@media print {
+  @page {
+    margin: 10mm;
+    size: auto;
+  }
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  aside,
+  header,
+  nav,
+  .no-print,
+  .dashboard-screen-content,
+  #root > div > aside,
+  #root > div > main > div > header,
+  #root > div > main > div > .card,
+  #root > div > main > div > .mb-6,
+  #root > div > main > div > section,
+  [role="dialog"] {
+    display: none !important;
+  }
+  #printable-report {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  #printable-report * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+

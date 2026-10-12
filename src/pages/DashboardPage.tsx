@@ -8,6 +8,7 @@ import {
   type DailyDataPoint,
 } from "../components/Charts";
 import { DateRangeFilter } from "../components/DateRangeFilter";
+import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/AppLayout";
 import { useBranch } from "../context/BranchContext";
 import { employeesApi, recordApi } from "../lib/api";
@@ -239,36 +240,50 @@ export function DashboardPage() {
       .sort((a, b) => b.totalPayout - a.totalPayout);
   }, [employees, ldCommissions, commissions, salaries]);
 
+  // Print modal selection state
+  const [printModalOpen, setPrintModalOpen] = useState(false);
+  const [selectedReportType, setSelectedReportType] = useState<"all" | "staff" | "cashflow" | "financial">("all");
+  const [includeHeader, setIncludeHeader] = useState(true);
+  const [includeSignatures, setIncludeSignatures] = useState(true);
+
+  const handleExecutePrint = () => {
+    setPrintModalOpen(false);
+    setTimeout(() => {
+      window.print();
+    }, 200);
+  };
+
   return (
     <>
-      <PageHeader
-        title="Dashboard & Reports"
-        description="Comprehensive restobar financial overview, visual reports, and staff earnings."
-        actions={
-          <div className="flex items-center gap-3">
-            {loading && (
-              <span className="flex items-center gap-1.5 text-xs font-medium text-amber-500">
-                <span className="h-2 w-2 animate-ping rounded-full bg-amber-500" />
-                Updating…
-              </span>
-            )}
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => window.print()}
-              title="Print or save as PDF"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-              </svg>
-              Print Report
-            </button>
-          </div>
-        }
-      />
+      <div className="dashboard-screen-content space-y-6">
+        <PageHeader
+          title="Dashboard & Reports"
+          description="Comprehensive restobar financial overview, visual reports, and staff earnings."
+          actions={
+            <div className="flex items-center gap-3">
+              {loading && (
+                <span className="flex items-center gap-1.5 text-xs font-medium text-amber-500">
+                  <span className="h-2 w-2 animate-ping rounded-full bg-amber-500" />
+                  Updating…
+                </span>
+              )}
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setPrintModalOpen(true)}
+                title="Choose and print specific financial reports"
+              >
+                <svg className="h-5 w-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                Print Report
+              </button>
+            </div>
+          }
+        />
 
-      {/* Restobar Brand Hero Banner */}
-      <div className="relative mb-6 overflow-hidden rounded-2xl border border-amber-500/25 bg-gradient-to-r from-amber-950/30 via-slate-900/90 to-slate-950 p-5 shadow-xl shadow-amber-500/5 animate-fade-in-up">
+        {/* Restobar Brand Hero Banner */}
+        <div className="relative mb-6 overflow-hidden rounded-2xl border border-amber-500/25 bg-gradient-to-r from-amber-950/30 via-slate-900/90 to-slate-950 p-5 shadow-xl shadow-amber-500/5 animate-fade-in-up">
         <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full bg-amber-500/15 blur-3xl" />
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -530,6 +545,451 @@ export function DashboardPage() {
           </div>
         )}
       </section>
-    </>
-  );
+    </div>
+
+    {/* Print Selection Modal */}
+    <Modal
+      open={printModalOpen}
+      onClose={() => setPrintModalOpen(false)}
+      title="Select Report to Print"
+    >
+      <div className="space-y-4">
+        {/* Scope info banner */}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-900/60 p-3.5 border border-slate-700/60 text-xs">
+          <div>
+            <span className="text-slate-400">Branch: </span>
+            <span className="font-bold text-amber-400">{currentBranch?.name || "All Branches"}</span>
+          </div>
+          <div>
+            <span className="text-slate-400">Reporting Range: </span>
+            <span className="font-bold text-slate-200">{describeRange(filter)}</span>
+          </div>
+        </div>
+
+        {/* Report Cards */}
+        <div className="space-y-2.5">
+          <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            Select Statement or Schedule:
+          </label>
+
+          {/* Option 1: All in One */}
+          <button
+            type="button"
+            onClick={() => setSelectedReportType("all")}
+            className={`w-full text-left rounded-xl p-3.5 border transition-all flex items-start gap-3.5 ${
+              selectedReportType === "all"
+                ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500 shadow-md shadow-amber-500/10"
+                : "border-slate-700/60 bg-slate-900/30 hover:border-slate-600 hover:bg-slate-800/40"
+            }`}
+          >
+            <span className="text-2xl mt-0.5">📑</span>
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white">Comprehensive Audit Dossier (All-in-One)</h4>
+                {selectedReportType === "all" && (
+                  <span className="text-xs font-bold text-amber-400">Selected</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Complete multi-section audit packet: Executive financial summary, staff earnings ranking, daily cash flows, and category breakdown.
+              </p>
+            </div>
+          </button>
+
+          {/* Option 2: Staff Ranking */}
+          <button
+            type="button"
+            onClick={() => setSelectedReportType("staff")}
+            className={`w-full text-left rounded-xl p-3.5 border transition-all flex items-start gap-3.5 ${
+              selectedReportType === "staff"
+                ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500 shadow-md shadow-amber-500/10"
+                : "border-slate-700/60 bg-slate-900/30 hover:border-slate-600 hover:bg-slate-800/40"
+            }`}
+          >
+            <span className="text-2xl mt-0.5">👥</span>
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white">Staff Earnings & Payout Ranking</h4>
+                {selectedReportType === "staff" && (
+                  <span className="text-xs font-bold text-amber-400">Selected</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Official payroll ledger: Staff ranks, LD drink counts, LD commissions, sales commissions, base salaries, and individual payouts.
+              </p>
+            </div>
+          </button>
+
+          {/* Option 3: Daily Financial Flows */}
+          <button
+            type="button"
+            onClick={() => setSelectedReportType("cashflow")}
+            className={`w-full text-left rounded-xl p-3.5 border transition-all flex items-start gap-3.5 ${
+              selectedReportType === "cashflow"
+                ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500 shadow-md shadow-amber-500/10"
+                : "border-slate-700/60 bg-slate-900/30 hover:border-slate-600 hover:bg-slate-800/40"
+            }`}
+          >
+            <span className="text-2xl mt-0.5">📊</span>
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white">Daily Financial Flows Statement</h4>
+                {selectedReportType === "cashflow" && (
+                  <span className="text-xs font-bold text-amber-400">Selected</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Day-by-day cash intake and outflow ledger: Daily sales revenues, operating outflows, net profits, and performance margins.
+              </p>
+            </div>
+          </button>
+
+          {/* Option 4: Executive Financial Statement */}
+          <button
+            type="button"
+            onClick={() => setSelectedReportType("financial")}
+            className={`w-full text-left rounded-xl p-3.5 border transition-all flex items-start gap-3.5 ${
+              selectedReportType === "financial"
+                ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500 shadow-md shadow-amber-500/10"
+                : "border-slate-700/60 bg-slate-900/30 hover:border-slate-600 hover:bg-slate-800/40"
+            }`}
+          >
+            <span className="text-2xl mt-0.5">💼</span>
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white">Executive Financial & Category Statement</h4>
+                {selectedReportType === "financial" && (
+                  <span className="text-xs font-bold text-amber-400">Selected</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                High-level income summary: Gross sales, operating outflows, net profit, margin %, and itemized category distribution.
+              </p>
+            </div>
+          </button>
+        </div>
+
+        {/* Customization toggles */}
+        <div className="space-y-2 pt-2 border-t border-slate-700/60 text-xs">
+          <label className="flex items-center gap-2.5 cursor-pointer text-slate-300 hover:text-white">
+            <input
+              type="checkbox"
+              checked={includeHeader}
+              onChange={(e) => setIncludeHeader(e.target.checked)}
+              className="rounded border-slate-700 text-amber-500 focus:ring-amber-500 bg-slate-900"
+            />
+            <span>Include Joyce Restobar Crest & Branch Header</span>
+          </label>
+          <label className="flex items-center gap-2.5 cursor-pointer text-slate-300 hover:text-white">
+            <input
+              type="checkbox"
+              checked={includeSignatures}
+              onChange={(e) => setIncludeSignatures(e.target.checked)}
+              className="rounded border-slate-700 text-amber-500 focus:ring-amber-500 bg-slate-900"
+            />
+            <span>Include Auditor Verification & Management Sign-off Lines</span>
+          </label>
+        </div>
+
+        {/* Modal Actions */}
+        <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-700/60">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setPrintModalOpen(false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-primary flex items-center gap-2"
+            onClick={handleExecutePrint}
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            Print Report
+          </button>
+        </div>
+      </div>
+    </Modal>
+
+    {/* Printable Report Output (Only rendered when printing or saving as PDF) */}
+    <div id="printable-report" className="hidden print:block text-black bg-white p-6 font-sans">
+      {/* Official Header */}
+      {includeHeader && (
+        <div className="border-b-2 border-black pb-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <img src={logoImg} alt="Joyce Restobar" className="h-16 w-16 object-contain" />
+              <div>
+                <h1 className="text-xl font-black tracking-wide uppercase">JOYCE RESTOBAR & LOUNGE</h1>
+                <p className="text-xs font-semibold text-gray-700 uppercase">
+                  Branch: {currentBranch?.name || "Main Branch"}
+                </p>
+                <p className="text-[11px] text-gray-500">Official Financial Audit & Ledger Statement</p>
+              </div>
+            </div>
+            <div className="text-right text-xs">
+              <p className="font-bold text-sm uppercase">
+                {selectedReportType === "all" && "Comprehensive Audit Dossier"}
+                {selectedReportType === "staff" && "Staff Earnings & Payout Ranking"}
+                {selectedReportType === "cashflow" && "Daily Financial Flows Statement"}
+                {selectedReportType === "financial" && "Executive Financial Statement"}
+              </p>
+              <p className="text-gray-600 mt-1">Period: <span className="font-semibold text-black">{describeRange(filter)}</span></p>
+              <p className="text-gray-500 text-[10px] mt-0.5">Printed: {new Date().toLocaleString()}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION: Executive Financial Summary (if 'all' or 'financial') */}
+      {(selectedReportType === "all" || selectedReportType === "financial") && (
+        <section className="mb-6">
+          <div className="flex items-center justify-between border-b border-black pb-1 mb-3">
+            <h2 className="text-sm font-bold uppercase tracking-wider">
+              {selectedReportType === "all" ? "1. Executive Financial Summary" : "Financial Performance Summary"}
+            </h2>
+            <span className="text-xs font-medium text-gray-600">Currency: Philippine Peso (PHP)</span>
+          </div>
+
+          <div className="grid grid-cols-4 gap-2 mb-4 text-center">
+            <div className="border border-gray-400 p-2 rounded">
+              <span className="text-[10px] uppercase text-gray-600 block">Gross Sales</span>
+              <span className="text-base font-bold">{formatMoney(totalSales)}</span>
+            </div>
+            <div className="border border-gray-400 p-2 rounded">
+              <span className="text-[10px] uppercase text-gray-600 block">Total Outflows</span>
+              <span className="text-base font-bold">{formatMoney(totalOutflows)}</span>
+            </div>
+            <div className="border border-gray-400 p-2 rounded">
+              <span className="text-[10px] uppercase text-gray-600 block">Net Operating Profit</span>
+              <span className="text-base font-bold">{formatMoney(netProfit)}</span>
+            </div>
+            <div className="border border-gray-400 p-2 rounded">
+              <span className="text-[10px] uppercase text-gray-600 block">Profit Margin</span>
+              <span className="text-base font-bold">{profitMargin.toFixed(1)}%</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {/* Sales by Category Table */}
+            <div>
+              <h3 className="text-xs font-bold uppercase mb-1.5">Sales by Category</h3>
+              <table className="w-full text-xs border-collapse border border-gray-300">
+                <thead>
+                  <tr className="bg-gray-100 border-b border-gray-300">
+                    <th className="p-1.5 text-left font-bold">Category</th>
+                    <th className="p-1.5 text-right font-bold">Orders</th>
+                    <th className="p-1.5 text-right font-bold">Amount</th>
+                    <th className="p-1.5 text-right font-bold">%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {salesCategories.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="p-2 text-center text-gray-500">No sales recorded</td>
+                    </tr>
+                  ) : (
+                    salesCategories.map((c) => (
+                      <tr key={c.category} className="border-b border-gray-200">
+                        <td className="p-1.5 font-medium">{c.category}</td>
+                        <td className="p-1.5 text-right">{c.count}</td>
+                        <td className="p-1.5 text-right font-semibold">{formatMoney(c.amount)}</td>
+                        <td className="p-1.5 text-right">{c.percentage.toFixed(1)}%</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 border-t-2 border-gray-400 font-bold">
+                    <td className="p-1.5">Total Sales</td>
+                    <td className="p-1.5 text-right">{sales.length}</td>
+                    <td className="p-1.5 text-right">{formatMoney(totalSales)}</td>
+                    <td className="p-1.5 text-right">100%</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            {/* Expenses by Category Table */}
+            <div>
+              <h3 className="text-xs font-bold uppercase mb-1.5">Operating Expenses Breakdown</h3>
+              <table className="w-full text-xs border-collapse border border-gray-300">
+                <thead>
+                  <tr className="bg-gray-100 border-b border-gray-300">
+                    <th className="p-1.5 text-left font-bold">Category</th>
+                    <th className="p-1.5 text-right font-bold">Count</th>
+                    <th className="p-1.5 text-right font-bold">Amount</th>
+                    <th className="p-1.5 text-right font-bold">%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expensesCategories.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="p-2 text-center text-gray-500">No expenses recorded</td>
+                    </tr>
+                  ) : (
+                    expensesCategories.map((c) => (
+                      <tr key={c.category} className="border-b border-gray-200">
+                        <td className="p-1.5 font-medium">{c.category}</td>
+                        <td className="p-1.5 text-right">{c.count}</td>
+                        <td className="p-1.5 text-right font-semibold">{formatMoney(c.amount)}</td>
+                        <td className="p-1.5 text-right">{c.percentage.toFixed(1)}%</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 border-t-2 border-gray-400 font-bold">
+                    <td className="p-1.5">Total OpEx</td>
+                    <td className="p-1.5 text-right">{expenses.length}</td>
+                    <td className="p-1.5 text-right">{formatMoney(totalExpenses)}</td>
+                    <td className="p-1.5 text-right">100%</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* SECTION: Staff Earnings & Payout Ranking (if 'all' or 'staff') */}
+      {(selectedReportType === "all" || selectedReportType === "staff") && (
+        <section className="mb-6">
+          <div className="flex items-center justify-between border-b border-black pb-1 mb-3">
+            <h2 className="text-sm font-bold uppercase tracking-wider">
+              {selectedReportType === "all" ? "2. Staff Earnings & Payout Ranking" : "Staff Earnings & Payout Schedule"}
+            </h2>
+            <span className="text-xs font-medium text-gray-600">{staffSummaries.length} Staff Member(s)</span>
+          </div>
+
+          <table className="w-full text-xs border-collapse border border-gray-300">
+            <thead>
+              <tr className="bg-gray-100 border-b border-gray-400">
+                <th className="p-1.5 text-center font-bold w-10">Rank</th>
+                <th className="p-1.5 text-left font-bold">Staff Member</th>
+                <th className="p-1.5 text-left font-bold">Position</th>
+                <th className="p-1.5 text-right font-bold">LD Drinks</th>
+                <th className="p-1.5 text-right font-bold">LD Comm.</th>
+                <th className="p-1.5 text-right font-bold">Sales Comm.</th>
+                <th className="p-1.5 text-right font-bold">Base Salary</th>
+                <th className="p-1.5 text-right font-bold">Total Payout</th>
+              </tr>
+            </thead>
+            <tbody>
+              {staffSummaries.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="p-3 text-center text-gray-500">No staff payout data found for this period.</td>
+                </tr>
+              ) : (
+                staffSummaries.map((s, idx) => (
+                  <tr key={s.name} className="border-b border-gray-200">
+                    <td className="p-1.5 text-center font-bold text-gray-700">#{idx + 1}</td>
+                    <td className="p-1.5 font-bold">{s.name}</td>
+                    <td className="p-1.5 text-gray-600">{s.position || "—"}</td>
+                    <td className="p-1.5 text-right">{s.ldQuantity > 0 ? s.ldQuantity : "—"}</td>
+                    <td className="p-1.5 text-right">{formatMoney(s.ldAmount)}</td>
+                    <td className="p-1.5 text-right">{formatMoney(s.commissionAmount)}</td>
+                    <td className="p-1.5 text-right">{formatMoney(s.salaryAmount)}</td>
+                    <td className="p-1.5 text-right font-bold">{formatMoney(s.totalPayout)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            <tfoot>
+              <tr className="bg-gray-50 border-t-2 border-black font-bold">
+                <td colSpan={3} className="p-2 text-right">TOTAL PAYROLL LIABILITIES:</td>
+                <td className="p-2 text-right">{totalLdQuantity}</td>
+                <td className="p-2 text-right">{formatMoney(totalLdAmount)}</td>
+                <td className="p-2 text-right">{formatMoney(totalCommissions)}</td>
+                <td className="p-2 text-right">{formatMoney(totalSalaries)}</td>
+                <td className="p-2 text-right text-sm underline">{formatMoney(totalStaffPayouts)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+      )}
+
+      {/* SECTION: Daily Financial Flows (if 'all' or 'cashflow') */}
+      {(selectedReportType === "all" || selectedReportType === "cashflow") && (
+        <section className="mb-6">
+          <div className="flex items-center justify-between border-b border-black pb-1 mb-3">
+            <h2 className="text-sm font-bold uppercase tracking-wider">
+              {selectedReportType === "all" ? "3. Daily Financial Flows Statement" : "Daily Financial Cash Flows Statement"}
+            </h2>
+            <span className="text-xs font-medium text-gray-600">{dailyData.length} Day(s) Recorded</span>
+          </div>
+
+          <table className="w-full text-xs border-collapse border border-gray-300">
+            <thead>
+              <tr className="bg-gray-100 border-b border-gray-400">
+                <th className="p-1.5 text-left font-bold">Date</th>
+                <th className="p-1.5 text-right font-bold">Gross Sales (Inflow)</th>
+                <th className="p-1.5 text-right font-bold">Operating Outflows</th>
+                <th className="p-1.5 text-right font-bold">Net Profit / Margin</th>
+                <th className="p-1.5 text-right font-bold">Margin %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dailyData.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-3 text-center text-gray-500">No chronological flow records for this period.</td>
+                </tr>
+              ) : (
+                dailyData.map((d) => {
+                  const dayMargin = d.sales > 0 ? (d.net / d.sales) * 100 : 0;
+                  return (
+                    <tr key={d.date} className="border-b border-gray-200">
+                      <td className="p-1.5 font-medium">{d.displayDate} ({d.date})</td>
+                      <td className="p-1.5 text-right font-semibold">{formatMoney(d.sales)}</td>
+                      <td className="p-1.5 text-right text-gray-700">{formatMoney(d.outflows)}</td>
+                      <td className="p-1.5 text-right font-bold">
+                        {d.net >= 0 ? "+" : ""}{formatMoney(d.net)}
+                      </td>
+                      <td className="p-1.5 text-right font-medium">{dayMargin.toFixed(1)}%</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+            <tfoot>
+              <tr className="bg-gray-50 border-t-2 border-black font-bold">
+                <td className="p-2">PERIOD TOTALS:</td>
+                <td className="p-2 text-right">{formatMoney(totalSales)}</td>
+                <td className="p-2 text-right">{formatMoney(totalOutflows)}</td>
+                <td className="p-2 text-right text-sm underline">{formatMoney(netProfit)}</td>
+                <td className="p-2 text-right">{profitMargin.toFixed(1)}%</td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+      )}
+
+      {/* Signatures & Auditor Verification */}
+      {includeSignatures && (
+        <div className="pt-8 mt-8 border-t border-gray-400">
+          <div className="grid grid-cols-3 gap-8 text-center text-xs">
+            <div>
+              <div className="border-b border-black mb-1 pb-8" />
+              <p className="font-bold uppercase">Prepared By</p>
+              <p className="text-[11px] text-gray-600">Cashier / Bookkeeper</p>
+            </div>
+            <div>
+              <div className="border-b border-black mb-1 pb-8" />
+              <p className="font-bold uppercase">Verified / Audited By</p>
+              <p className="text-[11px] text-gray-600">Branch Supervisor</p>
+            </div>
+            <div>
+              <div className="border-b border-black mb-1 pb-8" />
+              <p className="font-bold uppercase">Approved By</p>
+              <p className="text-[11px] text-gray-600">General Manager / Owner</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  </>
+);
 }
