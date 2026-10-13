@@ -152,8 +152,49 @@ export function RecordModule<T extends AnyRecord>({
   const firstFieldRef = useRef<HTMLInputElement>(null);
 
   const setField = (key: string, v: string) => {
-    setValues((prev) => ({ ...prev, [key]: v }));
-    if (errors[key]) setErrors(({ [key]: _removed, ...rest }) => rest);
+    setValues((prev) => {
+      const updated = { ...prev, [key]: v };
+
+      // Auto-populate amounts from employee's configured rates
+      if (hasEmployeeField) {
+        if (key === "name") {
+          const emp = employees.find((e) => e.name.toLowerCase() === v.toLowerCase());
+          if (emp) {
+            if (module === "salaries" && emp.baseSalary > 0) {
+              updated.amount = centavosToInput(emp.baseSalary);
+            } else if (module === "commissions" && emp.commission > 0) {
+              updated.amount = centavosToInput(emp.commission);
+            } else if (module === "ld_commissions" && emp.ldCommission > 0) {
+              const qty = Math.max(1, Number(prev.quantity) || 1);
+              if (!prev.quantity) updated.quantity = String(qty);
+              updated.amount = centavosToInput(qty * emp.ldCommission);
+            }
+          }
+        } else if (key === "quantity" && module === "ld_commissions") {
+          const empName = prev.name;
+          if (empName) {
+            const emp = employees.find((e) => e.name.toLowerCase() === empName.toLowerCase());
+            if (emp && emp.ldCommission > 0) {
+              const qty = Number(v);
+              if (qty >= 1) {
+                updated.amount = centavosToInput(qty * emp.ldCommission);
+              }
+            }
+          }
+        }
+      }
+
+      return updated;
+    });
+
+    setErrors((prevErrors) => {
+      const updated = { ...prevErrors };
+      delete updated[key];
+      if (key === "name" || (key === "quantity" && module === "ld_commissions")) {
+        delete updated.amount;
+      }
+      return updated;
+    });
   };
 
   const cancelEdit = useCallback(() => {

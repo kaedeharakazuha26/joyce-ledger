@@ -283,13 +283,25 @@ mod tests {
         // Employees
         crate::commands::employees::create(
             &conn,
-            &EmployeeInput { name: "Maria".into(), position: Some("Server".into()) },
+            &EmployeeInput {
+                name: "Maria".into(),
+                position: Some("Server".into()),
+                base_salary: None,
+                commission: None,
+                ld_commission: None,
+            },
             "main",
         )
         .unwrap();
         crate::commands::employees::create(
             &conn,
-            &EmployeeInput { name: "Carlos".into(), position: Some("Bartender".into()) },
+            &EmployeeInput {
+                name: "Carlos".into(),
+                position: Some("Bartender".into()),
+                base_salary: None,
+                commission: None,
+                ld_commission: None,
+            },
             "branch_two",
         )
         .unwrap();

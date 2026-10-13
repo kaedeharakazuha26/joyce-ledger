@@ -73,11 +73,17 @@ export interface Employee {
   id: number;
   name: string;
   position: string | null;
+  baseSalary: number;
+  commission: number;
+  ldCommission: number;
   createdAt: string;
 }
 export interface EmployeeInput {
   name: string;
   position: string | null;
+  baseSalary?: number | null;
+  commission?: number | null;
+  ldCommission?: number | null;
 }
 
 /** Module keys match the Rust command suffixes (list_<module>, ...). */

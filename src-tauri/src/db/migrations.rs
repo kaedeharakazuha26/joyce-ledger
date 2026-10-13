@@ -190,6 +190,12 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_employees_branch    ON employees(branch_id);
     CREATE INDEX IF NOT EXISTS idx_categories_branch   ON categories(branch_id);
     "#,
+    // v4: employee default base salary, commission, and LD commission per drink
+    r#"
+    ALTER TABLE employees ADD COLUMN base_salary INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE employees ADD COLUMN commission INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE employees ADD COLUMN ld_commission INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 /// Latest schema version known to this build.

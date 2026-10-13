@@ -133,14 +133,23 @@ pub struct Employee {
     pub id: i64,
     pub name: String,
     pub position: Option<String>,
+    pub base_salary: i64,
+    pub commission: i64,
+    pub ld_commission: i64,
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmployeeInput {
     pub name: String,
     pub position: Option<String>,
+    #[serde(default)]
+    pub base_salary: Option<i64>,
+    #[serde(default)]
+    pub commission: Option<i64>,
+    #[serde(default)]
+    pub ld_commission: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

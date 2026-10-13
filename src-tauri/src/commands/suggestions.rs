@@ -112,7 +112,18 @@ mod tests {
         assert!(cats.contains(&"New Special Combo".to_string()));
         assert!(cats.contains(&"Cocktails".to_string()));
 
-        employees::create(&conn, &EmployeeInput { name: "Ana".into(), position: None }, "main").unwrap();
+        employees::create(
+            &conn,
+            &EmployeeInput {
+                name: "Ana".into(),
+                position: None,
+                base_salary: None,
+                commission: None,
+                ld_commission: None,
+            },
+            "main",
+        )
+        .unwrap();
         salaries::create(
             &conn,
             &SalaryInput { name: "Carl".into(), amount: 1, date: "2026-10-13".into() },

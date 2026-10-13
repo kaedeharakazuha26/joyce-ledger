@@ -3,15 +3,35 @@ import { PageHeader } from "../components/AppLayout";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DataTable, type Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
+import { MoneyInput } from "../components/MoneyInput";
 import { TextInput } from "../components/TextInput";
 import { useToast } from "../components/Toast";
 import { useBranch } from "../context/BranchContext";
 import { employeesApi, errorMessage } from "../lib/api";
+import { centavosToInput, formatMoney, parsePesos } from "../lib/money";
 import type { Employee } from "../types/models";
 
 const columns: Column<Employee>[] = [
   { header: "Name", render: (r) => r.name, className: "font-semibold" },
   { header: "Position", render: (r) => r.position ?? <span className="text-slate-400">—</span> },
+  {
+    header: "Salary",
+    render: (r) => (r.baseSalary > 0 ? formatMoney(r.baseSalary) : <span className="text-slate-400">—</span>),
+    className: "tabular text-right font-medium",
+    align: "right",
+  },
+  {
+    header: "Commission",
+    render: (r) => (r.commission > 0 ? formatMoney(r.commission) : <span className="text-slate-400">—</span>),
+    className: "tabular text-right font-medium",
+    align: "right",
+  },
+  {
+    header: "LD Comm. / drink",
+    render: (r) => (r.ldCommission > 0 ? formatMoney(r.ldCommission) : <span className="text-slate-400">—</span>),
+    className: "tabular text-right font-medium",
+    align: "right",
+  },
   { header: "Added", render: (r) => r.createdAt.slice(0, 10), className: "tabular text-slate-500" },
 ];
 
@@ -25,7 +45,16 @@ export function EmployeesPage() {
 
   const [name, setName] = useState("");
   const [position, setPosition] = useState("");
-  const [errors, setErrors] = useState<{ name?: string; position?: string }>({});
+  const [baseSalary, setBaseSalary] = useState("");
+  const [commission, setCommission] = useState("");
+  const [ldCommission, setLdCommission] = useState("");
+  const [errors, setErrors] = useState<{
+    name?: string;
+    position?: string;
+    baseSalary?: string;
+    commission?: string;
+    ldCommission?: string;
+  }>({});
   const [editing, setEditing] = useState<Employee | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Employee | null>(null);
   const [saving, setSaving] = useState(false);
@@ -52,6 +81,9 @@ export function EmployeesPage() {
     setEditing(null);
     setName("");
     setPosition("");
+    setBaseSalary("");
+    setCommission("");
+    setLdCommission("");
     setErrors({});
   }, []);
 
@@ -73,12 +105,32 @@ export function EmployeesPage() {
     else if (employees.some((x) => x.id !== editing?.id && x.name.toLowerCase() === n.toLowerCase()))
       errs.name = "An employee with that name already exists.";
     if (p.length > 120) errs.position = "Position must be 120 characters or fewer.";
+
+    const parsedSalary = baseSalary.trim() ? parsePesos(baseSalary) : 0;
+    if (baseSalary.trim() && (parsedSalary === null || parsedSalary < 0)) {
+      errs.baseSalary = "Enter a valid salary amount.";
+    }
+    const parsedCommission = commission.trim() ? parsePesos(commission) : 0;
+    if (commission.trim() && (parsedCommission === null || parsedCommission < 0)) {
+      errs.commission = "Enter a valid commission amount.";
+    }
+    const parsedLdCommission = ldCommission.trim() ? parsePesos(ldCommission) : 0;
+    if (ldCommission.trim() && (parsedLdCommission === null || parsedLdCommission < 0)) {
+      errs.ldCommission = "Enter a valid LD commission amount.";
+    }
+
     setErrors(errs);
     if (Object.keys(errs).length) return;
 
     setSaving(true);
     try {
-      const input = { name: n, position: p || null };
+      const input = {
+        name: n,
+        position: p || null,
+        baseSalary: parsedSalary ?? 0,
+        commission: parsedCommission ?? 0,
+        ldCommission: parsedLdCommission ?? 0,
+      };
       if (editing) {
         await employeesApi.update(editing.id, input);
         toast.success("Employee updated.");
@@ -100,6 +152,9 @@ export function EmployeesPage() {
     setEditing(emp);
     setName(emp.name);
     setPosition(emp.position ?? "");
+    setBaseSalary(emp.baseSalary > 0 ? centavosToInput(emp.baseSalary) : "");
+    setCommission(emp.commission > 0 ? centavosToInput(emp.commission) : "");
+    setLdCommission(emp.ldCommission > 0 ? centavosToInput(emp.ldCommission) : "");
     setErrors({});
     document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
     setTimeout(() => nameRef.current?.focus(), 50);
@@ -128,7 +183,10 @@ export function EmployeesPage() {
 
   return (
     <>
-      <PageHeader title="Employees" description="The staff master list. Names here are suggested in LD Commission, Commission and Salary." />
+      <PageHeader
+        title="Employees"
+        description="The staff master list with configured rates. Salaries and commissions auto-populate when recording transactions."
+      />
 
       <form id="employees-form" noValidate onSubmit={handleSubmit} className={`card card-hover mb-6 p-6 transition-all duration-300 ${editing ? "ring-2 ring-amber-400" : ""}`}>
         <div className="mb-4 flex items-center justify-between">
@@ -139,7 +197,7 @@ export function EmployeesPage() {
             </span>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <TextInput
             ref={nameRef}
             id="employees-name"
@@ -155,13 +213,43 @@ export function EmployeesPage() {
           <TextInput
             id="employees-position"
             label="Position (optional)"
-            placeholder="e.g. Waiter, Cashier, Cook"
+            placeholder="e.g. Waiter, PR, Bartender"
             value={position}
             onChange={(v) => {
               setPosition(v);
               if (errors.position) setErrors((x) => ({ ...x, position: undefined }));
             }}
             error={errors.position}
+          />
+          <MoneyInput
+            id="employees-salary"
+            label="Base Salary (optional)"
+            value={baseSalary}
+            onChange={(v) => {
+              setBaseSalary(v);
+              if (errors.baseSalary) setErrors((x) => ({ ...x, baseSalary: undefined }));
+            }}
+            error={errors.baseSalary}
+          />
+          <MoneyInput
+            id="employees-commission"
+            label="Default Comm. (optional)"
+            value={commission}
+            onChange={(v) => {
+              setCommission(v);
+              if (errors.commission) setErrors((x) => ({ ...x, commission: undefined }));
+            }}
+            error={errors.commission}
+          />
+          <MoneyInput
+            id="employees-ld-commission"
+            label="LD Comm. / drink (optional)"
+            value={ldCommission}
+            onChange={(v) => {
+              setLdCommission(v);
+              if (errors.ldCommission) setErrors((x) => ({ ...x, ldCommission: undefined }));
+            }}
+            error={errors.ldCommission}
           />
         </div>
         <div className="mt-5 flex justify-end gap-3">
