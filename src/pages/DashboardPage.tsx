@@ -26,17 +26,31 @@ interface StaffSummary {
   totalPayout: number;
 }
 
+interface DashboardData {
+  sales: Sale[];
+  expenses: Expense[];
+  ldCommissions: LdCommission[];
+  commissions: Commission[];
+  salaries: Salary[];
+  employees: Employee[];
+}
+
+const emptyDashboardData: DashboardData = {
+  sales: [],
+  expenses: [],
+  ldCommissions: [],
+  commissions: [],
+  salaries: [],
+  employees: [],
+};
+
 export function DashboardPage() {
   const { currentBranchId, currentBranch } = useBranch();
   const [filter, setFilter] = useState<DateFilter>(todayFilter);
   const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<DashboardData>(emptyDashboardData);
 
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [ldCommissions, setLdCommissions] = useState<LdCommission[]>([]);
-  const [commissions, setCommissions] = useState<Commission[]>([]);
-  const [salaries, setSalaries] = useState<Salary[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  const { sales, expenses, ldCommissions, commissions, salaries, employees } = data;
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -49,12 +63,14 @@ export function DashboardPage() {
         recordApi<Salary, unknown>("salaries").list(filter, currentBranchId),
         employeesApi.list(currentBranchId),
       ]);
-      setSales(s);
-      setExpenses(e);
-      setLdCommissions(ld);
-      setCommissions(c);
-      setSalaries(sal);
-      setEmployees(emp);
+      setData({
+        sales: s,
+        expenses: e,
+        ldCommissions: ld,
+        commissions: c,
+        salaries: sal,
+        employees: emp,
+      });
     } catch (err) {
       console.error("Failed to load dashboard data", err);
     } finally {
@@ -283,7 +299,7 @@ export function DashboardPage() {
         />
 
         {/* Restobar Brand Hero Banner */}
-        <div className="relative mb-6 overflow-hidden rounded-2xl border border-amber-500/25 bg-gradient-to-r from-amber-950/30 via-slate-900/90 to-slate-950 p-5 shadow-xl shadow-amber-500/5 animate-fade-in-up">
+        <div className="relative mb-6 overflow-hidden rounded-2xl border border-amber-500/25 bg-gradient-to-r from-amber-950/30 via-slate-900/90 to-slate-950 p-5 shadow-xl shadow-amber-500/5">
         <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full bg-amber-500/15 blur-3xl" />
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -295,8 +311,8 @@ export function DashboardPage() {
                 className="relative h-14 w-14 rounded-xl object-contain bg-black/90 p-0.5 ring-1 ring-amber-500/50 shadow-lg shadow-amber-500/30 transition-transform duration-300 hover:scale-105"
               />
             </div>
-            <div>
-              <div className="flex items-center gap-2.5">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <span className="text-xl font-black tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-300 to-yellow-400">
                   Joyce Restobar
                 </span>
@@ -304,7 +320,7 @@ export function DashboardPage() {
                   {currentBranch?.name || "Main Branch"}
                 </span>
               </div>
-              <p className="mt-0.5 text-xs text-slate-400">
+              <p className="mt-0.5 text-xs text-slate-400 truncate">
                 Live Offline Ledger · Filtered: <span className="font-semibold text-slate-200">{describeRange(filter)}</span>
               </p>
             </div>
@@ -327,19 +343,19 @@ export function DashboardPage() {
       </div>
 
       {/* Executive Financial Stat Cards */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {/* Net Profit Card */}
-        <div className={`card card-hover relative col-span-1 overflow-hidden p-6 sm:col-span-2 lg:col-span-2 ${
+        <div className={`card card-hover min-w-0 relative col-span-1 overflow-hidden p-6 md:col-span-2 xl:col-span-2 ${
           netProfit >= 0
             ? "border-emerald-300/80 bg-gradient-to-br from-emerald-500/10 via-white to-white dark:border-emerald-800 dark:from-emerald-950/40 dark:via-slate-900 dark:to-slate-900"
             : "border-rose-300/80 bg-gradient-to-br from-rose-500/10 via-white to-white dark:border-rose-800 dark:from-rose-950/40 dark:via-slate-900 dark:to-slate-900"
         }`}>
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">
               Net Profit / Cash Balance ({describeRange(filter)})
             </span>
             <span
-              className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+              className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold ${
                 netProfit >= 0
                   ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                   : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
@@ -362,10 +378,10 @@ export function DashboardPage() {
         </div>
 
         {/* Gross Sales */}
-        <div className="card card-hover p-6 border-amber-500/20">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Gross Sales</span>
-            <span className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">
+        <div className="card card-hover min-w-0 p-6 border-amber-500/20">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 truncate">Gross Sales</span>
+            <span className="shrink-0 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">
               {sales.length} bills
             </span>
           </div>
@@ -376,10 +392,10 @@ export function DashboardPage() {
         </div>
 
         {/* Total Expenses */}
-        <div className="card card-hover p-6">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Operating Expenses</span>
-            <span className="rounded-md bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700 dark:bg-rose-500/20 dark:text-rose-300">
+        <div className="card card-hover min-w-0 p-6">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 truncate">Operating Expenses</span>
+            <span className="shrink-0 rounded-md bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700 dark:bg-rose-500/20 dark:text-rose-300">
               {expenses.length} costs
             </span>
           </div>
@@ -390,10 +406,10 @@ export function DashboardPage() {
         </div>
 
         {/* LD Commissions */}
-        <div className="card card-hover p-6">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">LD Commissions</span>
-            <span className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+        <div className="card card-hover min-w-0 p-6">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 truncate">LD Commissions</span>
+            <span className="shrink-0 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
               {totalLdQuantity} drinks
             </span>
           </div>
@@ -404,10 +420,10 @@ export function DashboardPage() {
         </div>
 
         {/* Regular Commissions */}
-        <div className="card card-hover p-6">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Commissions</span>
-            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+        <div className="card card-hover min-w-0 p-6">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 truncate">Commissions</span>
+            <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
               {commissions.length} entries
             </span>
           </div>
@@ -418,10 +434,10 @@ export function DashboardPage() {
         </div>
 
         {/* Salaries Paid */}
-        <div className="card card-hover p-6">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Salaries Paid</span>
-            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+        <div className="card card-hover min-w-0 p-6">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 truncate">Salaries Paid</span>
+            <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
               {salaries.length} payrolls
             </span>
           </div>
@@ -432,10 +448,10 @@ export function DashboardPage() {
         </div>
 
         {/* Staff Payouts Combined */}
-        <div className="card card-hover p-6 border-indigo-500/20">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Staff Payouts</span>
-            <span className="rounded-md bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+        <div className="card card-hover min-w-0 p-6 border-indigo-500/20">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 truncate">Total Staff Payouts</span>
+            <span className="shrink-0 rounded-md bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
               Combined
             </span>
           </div>
@@ -458,7 +474,7 @@ export function DashboardPage() {
       </div>
 
       {/* Category Breakdowns Grid */}
-      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
         <CategoryBreakdown
           title="Sales by Category"
           items={salesCategories}

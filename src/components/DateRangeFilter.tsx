@@ -37,7 +37,7 @@ export function DateRangeFilter({ idPrefix, value, onChange }: DateRangeFilterPr
         value={value.to ?? ""}
         onChange={(v) => onChange({ ...value, to: v || null })}
       />
-      <div className="flex rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-800 dark:bg-slate-950">
+      <div className="flex flex-wrap rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-800 dark:bg-slate-950">
         {presets.map((p) => {
           const active = p.id === "all" ? isAllDates(value) : same(value, p.make());
           return (

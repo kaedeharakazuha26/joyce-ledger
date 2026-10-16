@@ -1,19 +1,23 @@
 import type { ReactNode } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 
 export function AppLayout() {
-  const location = useLocation();
-
   return (
     <div className="relative flex h-full overflow-hidden bg-slate-100 dark:bg-[#090b10]">
-      {/* Modern Ambient Golden Glow Lights */}
-      <div className="pointer-events-none fixed -top-48 right-1/4 h-[500px] w-[500px] rounded-full bg-amber-500/10 blur-[140px] dark:bg-amber-500/15" />
-      <div className="pointer-events-none fixed bottom-[-100px] left-64 h-[350px] w-[350px] rounded-full bg-yellow-500/5 blur-[120px] dark:bg-amber-600/10" />
+      {/* Modern Ambient Golden Glow Lights with Hardware Acceleration */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed -top-48 right-1/4 h-[450px] w-[450px] rounded-full bg-amber-500/10 blur-[80px] dark:bg-amber-500/15 transform-gpu will-change-transform"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed bottom-[-100px] left-64 h-[300px] w-[300px] rounded-full bg-yellow-500/5 blur-[60px] dark:bg-amber-600/10 transform-gpu will-change-transform"
+      />
 
       <Sidebar />
-      <main className="relative flex-1 overflow-y-auto">
-        <div key={location.pathname} className="mx-auto max-w-6xl px-8 py-8 animate-fade-in-up">
+      <main className="relative flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-6">
           <Outlet />
         </div>
       </main>

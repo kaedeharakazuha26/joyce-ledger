@@ -62,8 +62,11 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
         )}
       </div>
 
-      <div className="relative h-[250px] overflow-x-auto pb-6 pt-3">
-        <div className="flex h-[200px] items-end gap-3 px-2" style={{ minWidth: `${data.length * 48}px` }}>
+      <div className="relative h-[250px] overflow-x-auto overflow-y-hidden pb-6 pt-3">
+        <div
+          className="flex h-[200px] items-end gap-3 px-2"
+          style={{ minWidth: data.length > 8 ? `${data.length * 52}px` : "100%" }}
+        >
           {data.map((item, idx) => {
             const salesHeight = Math.max(4, Math.round((item.sales / maxVal) * chartHeight * 0.85));
             const outflowsHeight = Math.max(4, Math.round((item.outflows / maxVal) * chartHeight * 0.85));
@@ -81,14 +84,14 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
             return (
               <div
                 key={item.date}
-                className="group relative flex flex-1 h-full flex-col items-center justify-end"
+                className="group relative flex flex-1 h-full flex-col items-center justify-end min-w-[36px]"
                 onMouseEnter={() => setHoveredIndex(idx)}
                 onMouseLeave={() => setHoveredIndex(null)}
               >
                 {/* Tooltip positioned safely inside chart bounds */}
                 {isHovered && (
                   <div
-                    className={`pointer-events-none absolute z-30 w-48 rounded-xl border border-amber-500/50 bg-slate-950/95 p-2.5 text-xs text-white shadow-2xl backdrop-blur-md transition-all duration-150 animate-pop-in ${horizontalClass}`}
+                    className={`pointer-events-none absolute z-30 w-48 max-w-[200px] rounded-xl border border-amber-500/50 bg-slate-950/95 p-2.5 text-xs text-white shadow-2xl backdrop-blur-md transition-all duration-150 animate-pop-in ${horizontalClass}`}
                     style={{
                       top: highestBar > 100 ? "4px" : undefined,
                       bottom: highestBar <= 100 ? `${highestBar + 28}px` : undefined,
