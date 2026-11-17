@@ -589,6 +589,9 @@ export function SettingsPage() {
                   <strong className="font-mono text-slate-700 dark:text-slate-200">
                     {syncStatus.pendingChanges}
                   </strong>
+                  <span className="ml-2 text-[11px] text-slate-400">
+                    (Low-usage sync: pushes ~2s after entry · 30s idle check)
+                  </span>
                 </span>
                 {syncStatus.lastSyncError && (
                   <span className="w-full rounded-lg border border-amber-300/60 bg-amber-50/70 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-300">
@@ -963,7 +966,7 @@ export function SettingsPage() {
               </div>
             </div>
             <span className="badge-gold">
-              v1.0.0 Stable
+              v2.0.0 Stable
             </span>
           </div>
 

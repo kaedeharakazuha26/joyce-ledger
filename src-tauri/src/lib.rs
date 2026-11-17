@@ -21,20 +21,49 @@ pub fn run() {
             app.manage(DbState::new(conn));
 
             let handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(8));
-                let state = handle.state::<DbState>();
-                match db::sync::run_sync_cycle(&state) {
-                    Ok((pushed, pulled)) => {
-                        if pulled > 0 {
-                            let _ = handle.emit("sync-updated", ());
+            std::thread::spawn(move || {
+                let mut last_poll = std::time::Instant::now()
+                    .checked_sub(std::time::Duration::from_secs(60))
+                    .unwrap_or_else(std::time::Instant::now);
+
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    let state = handle.state::<DbState>();
+                    let (enabled, pending, had_err) = {
+                        match state.conn() {
+                            Ok(conn) => db::sync::pending_sync_hint(&conn),
+                            Err(_) => (false, 0, false),
                         }
-                        if pushed > 0 || pulled > 0 {
+                    };
+                    if !enabled {
+                        continue;
+                    }
+
+                    // Adaptive sync cadence to protect Turso row-read limits:
+                    // - Push within ~2s whenever local writes exist in sync_outbox
+                    // - Poll every 30s when idle, or 60s when offline/errored
+                    let poll_interval = if had_err {
+                        std::time::Duration::from_secs(60)
+                    } else {
+                        std::time::Duration::from_secs(30)
+                    };
+                    if pending == 0 && last_poll.elapsed() < poll_interval {
+                        continue;
+                    }
+
+                    last_poll = std::time::Instant::now();
+                    match db::sync::run_sync_cycle(&state) {
+                        Ok((pushed, pulled)) => {
+                            if pulled > 0 {
+                                let _ = handle.emit("sync-updated", ());
+                            }
+                            if pushed > 0 || pulled > 0 {
+                                let _ = handle.emit("sync-status", ());
+                            }
+                        }
+                        Err(_) => {
                             let _ = handle.emit("sync-status", ());
                         }
-                    }
-                    Err(_) => {
-                        let _ = handle.emit("sync-status", ());
                     }
                 }
             });

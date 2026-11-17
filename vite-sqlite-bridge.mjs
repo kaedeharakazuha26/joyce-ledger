@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-function openDatabase() {
-  const dbPath = path.resolve(process.cwd(), "joyce_restobar_ledger.db");
+function openDatabase(customDbPath) {
+  const dbPath = customDbPath ? path.resolve(customDbPath) : path.resolve(process.cwd(), "joyce_restobar_ledger.db");
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec("PRAGMA journal_mode = WAL;");
@@ -161,9 +161,27 @@ function hranaStmt(sql, args = []) {
 function queueAllLocalRecords(db) {
   db.exec(`
     INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
-      SELECT 'branches', sync_id, 'UPSERT', id, strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM branches WHERE sync_id IS NOT NULL;
+      SELECT 'branches', sync_id, 'UPSERT', id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM branches
+      WHERE sync_id IS NOT NULL
+        AND NOT (
+          (id = 'main' AND name = 'Main Branch' AND updated_at = created_at)
+          OR (id = 'branch_2' AND name = 'Branch 2' AND updated_at = created_at)
+        );
     INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
-      SELECT 'categories', sync_id, 'UPSERT', branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM categories WHERE sync_id IS NOT NULL;
+      SELECT 'categories', sync_id, 'UPSERT', branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM categories
+      WHERE sync_id IS NOT NULL
+        AND NOT (
+          branch_id IN ('main', 'branch_2')
+          AND updated_at = created_at
+          AND name IN (
+            'Food','Drinks','Beer','Liquor','Cocktails','Cigarettes','Others',
+            'Kitchen Supplies','Meat & Seafood','Produce & Groceries','Beverages & Ice',
+            'Gas & LPG','Utilities','Maintenance','Packaging',
+            'Bottle','Table','VIP','Service'
+          )
+        );
     INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
       SELECT 'employees', sync_id, 'UPSERT', branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM employees WHERE sync_id IS NOT NULL;
     INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
@@ -177,8 +195,28 @@ function queueAllLocalRecords(db) {
     INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
       SELECT 'salaries', sync_id, 'UPSERT', branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM salaries WHERE sync_id IS NOT NULL;
     INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
-      SELECT 'app_settings', 'admin_pin', 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM app_settings WHERE key = 'admin_pin';
+      SELECT 'app_settings', 'admin_pin', 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM app_settings WHERE key = 'admin_pin' AND value != '0000';
   `);
+}
+
+const INITIALIZED_TURSO_URLS = new Set();
+
+async function ensureRemoteSchemaOnce(pipelineUrl, token) {
+  if (INITIALIZED_TURSO_URLS.has(pipelineUrl)) return;
+  await sendTursoPipeline(pipelineUrl, token, [
+    hranaStmt(`CREATE TABLE IF NOT EXISTS turso_sync_log (seq INTEGER PRIMARY KEY, table_name TEXT NOT NULL, sync_id TEXT NOT NULL, op TEXT NOT NULL, branch_id TEXT NOT NULL, payload TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL)`),
+    hranaStmt(`CREATE TABLE IF NOT EXISTS branches (sync_id TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
+    hranaStmt(`CREATE TABLE IF NOT EXISTS categories (sync_id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
+    hranaStmt(`CREATE TABLE IF NOT EXISTS employees (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, position TEXT, base_salary INTEGER NOT NULL DEFAULT 0, commission INTEGER NOT NULL DEFAULT 0, ld_commission INTEGER NOT NULL DEFAULT 0, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
+    hranaStmt(`CREATE TABLE IF NOT EXISTS sales (sync_id TEXT PRIMARY KEY, category TEXT NOT NULL, amount INTEGER NOT NULL, sale_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
+    hranaStmt(`CREATE TABLE IF NOT EXISTS expenses (sync_id TEXT PRIMARY KEY, category TEXT NOT NULL, amount INTEGER NOT NULL, expense_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
+    hranaStmt(`CREATE TABLE IF NOT EXISTS ld_commissions (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, quantity INTEGER NOT NULL, amount INTEGER NOT NULL, commission_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
+    hranaStmt(`CREATE TABLE IF NOT EXISTS commissions (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, amount INTEGER NOT NULL, commission_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
+    hranaStmt(`CREATE TABLE IF NOT EXISTS salaries (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, amount INTEGER NOT NULL, salary_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
+    hranaStmt(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`),
+  ]);
+  INITIALIZED_TURSO_URLS.add(pipelineUrl);
 }
 
 async function runTursoSyncCycle(db) {
@@ -188,144 +226,161 @@ async function runTursoSyncCycle(db) {
   if (!enabled || !rawUrl.trim() || !token.trim()) return { pushed: 0, pulled: 0 };
 
   const pipelineUrl = normalizeTursoUrl(rawUrl);
-  const lastCursor = Number(getLocalSetting(db, "last_sync_cursor") || "0");
 
   try {
-    await sendTursoPipeline(pipelineUrl, token, [
-      hranaStmt(`CREATE TABLE IF NOT EXISTS turso_sync_log (seq INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT NOT NULL, sync_id TEXT NOT NULL, op TEXT NOT NULL, branch_id TEXT NOT NULL, payload TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL)`),
-      hranaStmt(`CREATE TABLE IF NOT EXISTS branches (sync_id TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
-      hranaStmt(`CREATE TABLE IF NOT EXISTS categories (sync_id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
-      hranaStmt(`CREATE TABLE IF NOT EXISTS employees (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, position TEXT, base_salary INTEGER NOT NULL DEFAULT 0, commission INTEGER NOT NULL DEFAULT 0, ld_commission INTEGER NOT NULL DEFAULT 0, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
-      hranaStmt(`CREATE TABLE IF NOT EXISTS sales (sync_id TEXT PRIMARY KEY, category TEXT NOT NULL, amount INTEGER NOT NULL, sale_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
-      hranaStmt(`CREATE TABLE IF NOT EXISTS expenses (sync_id TEXT PRIMARY KEY, category TEXT NOT NULL, amount INTEGER NOT NULL, expense_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
-      hranaStmt(`CREATE TABLE IF NOT EXISTS ld_commissions (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, quantity INTEGER NOT NULL, amount INTEGER NOT NULL, commission_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
-      hranaStmt(`CREATE TABLE IF NOT EXISTS commissions (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, amount INTEGER NOT NULL, commission_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
-      hranaStmt(`CREATE TABLE IF NOT EXISTS salaries (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, amount INTEGER NOT NULL, salary_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
-      hranaStmt(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`),
-    ]);
+    await ensureRemoteSchemaOnce(pipelineUrl, token);
 
-    const outbox = db.prepare("SELECT table_name, sync_id, op, branch_id, changed_at FROM sync_outbox LIMIT 50").all();
-    const deviceFallback = ensureDeviceName(db);
-    if (outbox.length > 0) {
-      const stmts = [];
-      for (const item of outbox) {
-        let payload = {};
-        let updatedAt = item.changed_at;
-        let deviceName = deviceFallback;
-        if (item.op !== "DELETE") {
-          const row =
-            item.table_name === "app_settings"
-              ? db.prepare("SELECT key, value, updated_at FROM app_settings WHERE key='admin_pin'").get()
-              : db.prepare(`SELECT * FROM ${item.table_name} WHERE sync_id = ?`).get(item.sync_id);
-          if (row) {
-            payload = { ...row };
-            updatedAt = row.updated_at || item.changed_at;
-            deviceName = row.device_name || deviceFallback;
-          }
-        }
-        stmts.push(
-          hranaStmt(
-            "INSERT INTO turso_sync_log (table_name, sync_id, op, branch_id, payload, device_name, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [item.table_name, item.sync_id, item.op, item.branch_id, JSON.stringify(payload), deviceName, updatedAt],
-          ),
-        );
-      }
-      await sendTursoPipeline(pipelineUrl, token, stmts);
-      for (const item of outbox) {
-        db.prepare("DELETE FROM sync_outbox WHERE table_name=? AND sync_id=? AND changed_at <= ?").run(
-          item.table_name,
-          item.sync_id,
-          item.changed_at,
-        );
-      }
-    }
+    let totalPushed = 0;
+    let totalPulled = 0;
 
-    const pullRes = await sendTursoPipeline(pipelineUrl, token, [
-      hranaStmt(
-        "SELECT seq, table_name, sync_id, op, branch_id, payload, device_name, updated_at FROM turso_sync_log WHERE seq > ? ORDER BY seq ASC LIMIT 400",
-        [lastCursor],
-      ),
-    ]);
-    const rows = pullRes[0]?.response?.result?.rows || [];
-    let maxSeq = lastCursor;
-    let pulled = 0;
-    if (rows.length > 0) {
-      db.exec("BEGIN");
-      setLocalSetting(db, "sync_applying_remote", "1");
-      try {
-        for (const r of rows) {
-          const seq = Number(r[0]?.value || 0);
-          if (seq > maxSeq) maxSeq = seq;
-          const table = String(r[1]?.value || "");
-          const syncId = String(r[2]?.value || "");
-          const op = String(r[3]?.value || "");
-          const payload = JSON.parse(String(r[5]?.value || "{}"));
-          const deviceName = String(r[6]?.value || "");
-          const updatedAt = String(r[7]?.value || "");
-
-          if (op === "DELETE") {
-            if (table !== "branches" || syncId !== "branch:main") {
-              db.prepare(`DELETE FROM ${table} WHERE sync_id = ?`).run(syncId);
+    for (let round = 0; round < 30; round++) {
+      const lastCursor = Number(getLocalSetting(db, "last_sync_cursor") || "0");
+      const outbox = db.prepare("SELECT table_name, sync_id, op, branch_id, changed_at FROM sync_outbox LIMIT 50").all();
+      const deviceFallback = ensureDeviceName(db);
+      if (outbox.length > 0) {
+        const stmts = [];
+        for (const item of outbox) {
+          let payload = {};
+          let updatedAt = item.changed_at;
+          let deviceName = deviceFallback;
+          if (item.op !== "DELETE") {
+            const row =
+              item.table_name === "app_settings"
+                ? db.prepare("SELECT key, value, updated_at FROM app_settings WHERE key='admin_pin'").get()
+                : db.prepare(`SELECT * FROM ${item.table_name} WHERE sync_id = ?`).get(item.sync_id);
+            if (row) {
+              payload = { ...row };
+              updatedAt = row.updated_at || item.changed_at;
+              deviceName = row.device_name || deviceFallback;
             }
-            pulled++;
-            continue;
           }
-          if (table === "sales") {
-            db.prepare("INSERT INTO sales (category, amount, sale_date, branch_id, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET category=excluded.category, amount=excluded.amount, sale_date=excluded.sale_date, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
-              .run(payload.category, Number(payload.amount), payload.sale_date, payload.branch_id, payload.created_at, updatedAt, syncId, deviceName);
-            pulled++;
-          } else if (table === "expenses") {
-            db.prepare("INSERT INTO expenses (category, amount, expense_date, branch_id, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET category=excluded.category, amount=excluded.amount, expense_date=excluded.expense_date, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
-              .run(payload.category, Number(payload.amount), payload.expense_date, payload.branch_id, payload.created_at, updatedAt, syncId, deviceName);
-            pulled++;
-          } else if (table === "ld_commissions") {
-            db.prepare("INSERT INTO ld_commissions (name, quantity, amount, commission_date, branch_id, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET name=excluded.name, quantity=excluded.quantity, amount=excluded.amount, commission_date=excluded.commission_date, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
-              .run(payload.name, Number(payload.quantity), Number(payload.amount), payload.commission_date, payload.branch_id, payload.created_at, updatedAt, syncId, deviceName);
-            pulled++;
-          } else if (table === "commissions") {
-            db.prepare("INSERT INTO commissions (name, category, amount, commission_date, branch_id, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET name=excluded.name, category=excluded.category, amount=excluded.amount, commission_date=excluded.commission_date, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
-              .run(payload.name, payload.category, Number(payload.amount), payload.commission_date, payload.branch_id, payload.created_at, updatedAt, syncId, deviceName);
-            pulled++;
-          } else if (table === "salaries") {
-            db.prepare("INSERT INTO salaries (name, amount, salary_date, branch_id, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET name=excluded.name, amount=excluded.amount, salary_date=excluded.salary_date, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
-              .run(payload.name, Number(payload.amount), payload.salary_date, payload.branch_id, payload.created_at, updatedAt, syncId, deviceName);
-            pulled++;
-          } else if (table === "employees") {
-            const exists = db.prepare("SELECT COUNT(*) as c FROM employees WHERE sync_id = ?").get(syncId).c;
-            if (!exists) {
-              db.prepare("UPDATE employees SET sync_id = ? WHERE branch_id = ? AND lower(name) = lower(?)").run(syncId, payload.branch_id, payload.name);
-            }
-            db.prepare("INSERT INTO employees (name, position, base_salary, commission, ld_commission, branch_id, created_at, sync_id, updated_at, device_name) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET name=excluded.name, position=excluded.position, base_salary=excluded.base_salary, commission=excluded.commission, ld_commission=excluded.ld_commission, updated_at=excluded.updated_at, device_name=excluded.device_name")
-              .run(payload.name, payload.position ?? null, Number(payload.base_salary || 0), Number(payload.commission || 0), Number(payload.ld_commission || 0), payload.branch_id, payload.created_at, syncId, updatedAt, deviceName);
-            pulled++;
-          } else if (table === "branches") {
-            db.prepare("INSERT INTO branches (id, name, created_at, sync_id, updated_at, device_name) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sync_id=excluded.sync_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
-              .run(payload.id, payload.name, payload.created_at, syncId, updatedAt, deviceName);
-            pulled++;
-          }
+          stmts.push(
+            hranaStmt(
+              "INSERT INTO turso_sync_log (table_name, sync_id, op, branch_id, payload, device_name, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              [item.table_name, item.sync_id, item.op, item.branch_id, JSON.stringify(payload), deviceName, updatedAt],
+            ),
+          );
         }
-        setLocalSetting(db, "last_sync_cursor", String(maxSeq));
-        setLocalSetting(db, "sync_applying_remote", "0");
-        db.exec("COMMIT");
-      } catch (e) {
-        setLocalSetting(db, "sync_applying_remote", "0");
-        db.exec("ROLLBACK");
-        throw e;
+        await sendTursoPipeline(pipelineUrl, token, stmts);
+        for (const item of outbox) {
+          db.prepare("DELETE FROM sync_outbox WHERE table_name=? AND sync_id=? AND changed_at <= ?").run(
+            item.table_name,
+            item.sync_id,
+            item.changed_at,
+          );
+        }
+        totalPushed += outbox.length;
       }
+
+      const pullRes = await sendTursoPipeline(pipelineUrl, token, [
+        hranaStmt(
+          "SELECT seq, table_name, sync_id, op, branch_id, payload, device_name, updated_at FROM turso_sync_log WHERE seq > ? ORDER BY seq ASC LIMIT 400",
+          [lastCursor],
+        ),
+      ]);
+      const rows = pullRes[0]?.response?.result?.rows || [];
+      let maxSeq = lastCursor;
+      let pulled = 0;
+      if (rows.length > 0) {
+        db.exec("BEGIN");
+        setLocalSetting(db, "sync_applying_remote", "1");
+        try {
+          for (const r of rows) {
+            const seq = Number(r[0]?.value || 0);
+            if (seq > maxSeq) maxSeq = seq;
+            const table = String(r[1]?.value || "");
+            const syncId = String(r[2]?.value || "");
+            const op = String(r[3]?.value || "");
+            const payload = JSON.parse(String(r[5]?.value || "{}"));
+            const deviceName = String(r[6]?.value || "");
+            const updatedAt = String(r[7]?.value || "");
+
+            const hasPending = Number(
+              db.prepare("SELECT COUNT(*) as c FROM sync_outbox WHERE table_name = ? AND sync_id = ?").get(table, syncId)?.c || 0,
+            );
+            if (hasPending > 0) continue;
+
+            if (op === "DELETE") {
+              if (table !== "branches" || syncId !== "branch:main") {
+                db.prepare(`DELETE FROM ${table} WHERE sync_id = ?`).run(syncId);
+              }
+              pulled++;
+              continue;
+            }
+            if (table === "sales") {
+              db.prepare("INSERT INTO sales (category, amount, sale_date, branch_id, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET category=excluded.category, amount=excluded.amount, sale_date=excluded.sale_date, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
+                .run(payload.category, Number(payload.amount), payload.sale_date, payload.branch_id, payload.created_at, updatedAt, syncId, deviceName);
+              pulled++;
+            } else if (table === "expenses") {
+              db.prepare("INSERT INTO expenses (category, amount, expense_date, branch_id, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET category=excluded.category, amount=excluded.amount, expense_date=excluded.expense_date, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
+                .run(payload.category, Number(payload.amount), payload.expense_date, payload.branch_id, payload.created_at, updatedAt, syncId, deviceName);
+              pulled++;
+            } else if (table === "ld_commissions") {
+              db.prepare("INSERT INTO ld_commissions (name, quantity, amount, commission_date, branch_id, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET name=excluded.name, quantity=excluded.quantity, amount=excluded.amount, commission_date=excluded.commission_date, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
+                .run(payload.name, Number(payload.quantity), Number(payload.amount), payload.commission_date, payload.branch_id, payload.created_at, updatedAt, syncId, deviceName);
+              pulled++;
+            } else if (table === "commissions") {
+              db.prepare("INSERT INTO commissions (name, category, amount, commission_date, branch_id, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET name=excluded.name, category=excluded.category, amount=excluded.amount, commission_date=excluded.commission_date, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
+                .run(payload.name, payload.category, Number(payload.amount), payload.commission_date, payload.branch_id, payload.created_at, updatedAt, syncId, deviceName);
+              pulled++;
+            } else if (table === "salaries") {
+              db.prepare("INSERT INTO salaries (name, amount, salary_date, branch_id, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET name=excluded.name, amount=excluded.amount, salary_date=excluded.salary_date, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
+                .run(payload.name, Number(payload.amount), payload.salary_date, payload.branch_id, payload.created_at, updatedAt, syncId, deviceName);
+              pulled++;
+            } else if (table === "employees") {
+              const exists = db.prepare("SELECT COUNT(*) as c FROM employees WHERE sync_id = ?").get(syncId).c;
+              if (!exists) {
+                db.prepare("UPDATE employees SET sync_id = ? WHERE branch_id = ? AND lower(name) = lower(?)").run(syncId, payload.branch_id, payload.name);
+              } else {
+                db.prepare("DELETE FROM employees WHERE branch_id = ? AND lower(name) = lower(?) AND sync_id != ?").run(payload.branch_id, payload.name, syncId);
+              }
+              db.prepare("INSERT INTO employees (name, position, base_salary, commission, ld_commission, branch_id, created_at, sync_id, updated_at, device_name) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET name=excluded.name, position=excluded.position, base_salary=excluded.base_salary, commission=excluded.commission, ld_commission=excluded.ld_commission, updated_at=excluded.updated_at, device_name=excluded.device_name")
+                .run(payload.name, payload.position ?? null, Number(payload.base_salary || 0), Number(payload.commission || 0), Number(payload.ld_commission || 0), payload.branch_id, payload.created_at, syncId, updatedAt, deviceName);
+              pulled++;
+            } else if (table === "categories") {
+              const exists = db.prepare("SELECT COUNT(*) as c FROM categories WHERE sync_id = ?").get(syncId).c;
+              if (!exists) {
+                db.prepare("UPDATE categories SET sync_id = ? WHERE kind = ? AND lower(name) = lower(?) AND branch_id = ?").run(syncId, payload.kind, payload.name, payload.branch_id);
+              }
+              db.prepare("INSERT INTO categories (kind, name, branch_id, created_at, sync_id, updated_at, device_name) VALUES (?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET kind=excluded.kind, name=excluded.name, branch_id=excluded.branch_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
+                .run(payload.kind, payload.name, payload.branch_id, payload.created_at, syncId, updatedAt, deviceName);
+              pulled++;
+            } else if (table === "branches") {
+              db.prepare("INSERT INTO branches (id, name, created_at, sync_id, updated_at, device_name) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sync_id=excluded.sync_id, updated_at=excluded.updated_at, device_name=excluded.device_name")
+                .run(payload.id, payload.name, payload.created_at, syncId, updatedAt, deviceName);
+              pulled++;
+            } else if (table === "app_settings" && syncId === "admin_pin") {
+              db.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('admin_pin', ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+                .run(payload.value, updatedAt);
+              pulled++;
+            }
+          }
+          setLocalSetting(db, "last_sync_cursor", String(maxSeq));
+          setLocalSetting(db, "sync_applying_remote", "0");
+          db.exec("COMMIT");
+        } catch (e) {
+          setLocalSetting(db, "sync_applying_remote", "0");
+          db.exec("ROLLBACK");
+          throw e;
+        }
+      }
+      totalPulled += pulled;
+      const remaining = Number(db.prepare("SELECT COUNT(*) as c FROM sync_outbox").get().c || 0);
+      if (remaining === 0 && rows.length < 400) break;
     }
 
     const nowTs = db.prepare("SELECT datetime('now','localtime') as t").get().t;
     setLocalSetting(db, "last_sync_at", nowTs);
     setLocalSetting(db, "last_sync_error", "");
-    return { pushed: outbox.length, pulled };
+    return { pushed: totalPushed, pulled: totalPulled };
   } catch (e) {
     setLocalSetting(db, "last_sync_error", e.message || String(e));
     throw e;
   }
 }
 
-export function createSqliteMiddleware() {
-  const db = openDatabase();
+export function createSqliteMiddleware(customDbPath) {
+  const db = openDatabase(customDbPath);
 
   async function dispatch(cmd, args = {}) {
     const emit = [];

@@ -159,13 +159,34 @@ pub fn get_sync_status(conn: &Connection) -> AppResult<SyncStatus> {
     })
 }
 
-/// Queue every local record into `sync_outbox` so a newly connected laptop uploads its existing records.
+/// Queue user-created or modified local records into `sync_outbox` when connecting to Turso.
+/// Skips unchanged default seeded branches, categories, and default PIN ('0000') to minimize Turso row writes/reads.
 pub fn queue_all_local_records(conn: &Connection) -> AppResult<usize> {
     let sql = "
         INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
-        SELECT 'branches', sync_id, 'UPSERT', id, strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM branches WHERE sync_id IS NOT NULL;
+        SELECT 'branches', sync_id, 'UPSERT', id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        FROM branches
+        WHERE sync_id IS NOT NULL
+          AND NOT (
+            (id = 'main' AND name = 'Main Branch' AND updated_at = created_at)
+            OR (id = 'branch_2' AND name = 'Branch 2' AND updated_at = created_at)
+          );
+
         INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
-        SELECT 'categories', sync_id, 'UPSERT', branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM categories WHERE sync_id IS NOT NULL;
+        SELECT 'categories', sync_id, 'UPSERT', branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        FROM categories
+        WHERE sync_id IS NOT NULL
+          AND NOT (
+            branch_id IN ('main', 'branch_2')
+            AND updated_at = created_at
+            AND name IN (
+              'Food','Drinks','Beer','Liquor','Cocktails','Cigarettes','Others',
+              'Kitchen Supplies','Meat & Seafood','Produce & Groceries','Beverages & Ice',
+              'Gas & LPG','Utilities','Maintenance','Packaging',
+              'Bottle','Table','VIP','Service'
+            )
+          );
+
         INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
         SELECT 'employees', sync_id, 'UPSERT', branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM employees WHERE sync_id IS NOT NULL;
         INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
@@ -179,11 +200,27 @@ pub fn queue_all_local_records(conn: &Connection) -> AppResult<usize> {
         INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
         SELECT 'salaries', sync_id, 'UPSERT', branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM salaries WHERE sync_id IS NOT NULL;
         INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
-        SELECT 'app_settings', 'admin_pin', 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM app_settings WHERE key = 'admin_pin';
+        SELECT 'app_settings', 'admin_pin', 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        FROM app_settings WHERE key = 'admin_pin' AND value != '0000';
     ";
     conn.execute_batch(sql)?;
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r.get(0))?;
     Ok(count as usize)
+}
+
+/// Fast local-only check used by the adaptive background sync loop (zero network I/O).
+pub fn pending_sync_hint(conn: &Connection) -> (bool, i64, bool) {
+    let enabled = get_local_setting(conn, "sync_enabled") == "1"
+        && !get_local_setting(conn, "turso_url").trim().is_empty()
+        && !get_local_setting(conn, "turso_token").trim().is_empty();
+    if !enabled {
+        return (false, 0, false);
+    }
+    let pending: i64 = conn
+        .query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r.get(0))
+        .unwrap_or(0);
+    let had_err = !get_local_setting(conn, "last_sync_error").trim().is_empty();
+    (true, pending, had_err)
 }
 
 fn table_priority(table_name: &str) -> i32 {
@@ -927,7 +964,7 @@ fn ensure_remote_schema(pipeline_url: &str, token: &str) -> AppResult<()> {
     let ddl = vec![
         hrana_stmt(
             "CREATE TABLE IF NOT EXISTS turso_sync_log (
-                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                seq INTEGER PRIMARY KEY,
                 table_name TEXT NOT NULL,
                 sync_id TEXT NOT NULL,
                 op TEXT NOT NULL,
@@ -938,7 +975,6 @@ fn ensure_remote_schema(pipeline_url: &str, token: &str) -> AppResult<()> {
             )",
             vec![],
         ),
-        hrana_stmt("CREATE INDEX IF NOT EXISTS idx_turso_sync_log_seq ON turso_sync_log(seq)", vec![]),
         hrana_stmt(
             "CREATE TABLE IF NOT EXISTS branches (
                 sync_id TEXT PRIMARY KEY,
