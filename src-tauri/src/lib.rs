@@ -4,7 +4,7 @@ pub mod error;
 pub mod models;
 pub mod money;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::db::DbState;
 
@@ -19,6 +19,26 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let conn = db::open(&dir.join(DB_FILE_NAME))?;
             app.manage(DbState::new(conn));
+
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(8));
+                let state = handle.state::<DbState>();
+                match db::sync::run_sync_cycle(&state) {
+                    Ok((pushed, pulled)) => {
+                        if pulled > 0 {
+                            let _ = handle.emit("sync-updated", ());
+                        }
+                        if pushed > 0 || pulled > 0 {
+                            let _ = handle.emit("sync-status", ());
+                        }
+                    }
+                    Err(_) => {
+                        let _ = handle.emit("sync-status", ());
+                    }
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -65,6 +85,12 @@ pub fn run() {
             commands::admin::reset_database,
             commands::admin::delete_branch,
             commands::admin::update_branch,
+            commands::admin::get_sync_settings,
+            commands::admin::save_device_name,
+            commands::admin::test_turso_connection,
+            commands::admin::save_turso_settings,
+            commands::admin::sync_now,
+            commands::admin::disconnect_turso,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Joyce Restobar Ledger");

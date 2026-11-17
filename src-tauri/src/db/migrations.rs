@@ -196,6 +196,382 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE employees ADD COLUMN commission INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE employees ADD COLUMN ld_commission INTEGER NOT NULL DEFAULT 0;
     "#,
+    // v5: multi-laptop sync metadata (sync_id, device_name), local-only settings, and trigger outbox
+    r#"
+    CREATE TABLE IF NOT EXISTS local_settings (
+      key         TEXT PRIMARY KEY,
+      value       TEXT NOT NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+
+    INSERT OR IGNORE INTO local_settings (key, value)
+      SELECT 'active_branch', value FROM app_settings WHERE key = 'active_branch';
+    INSERT OR IGNORE INTO local_settings (key, value) VALUES
+      ('active_branch', 'main'),
+      ('device_name', ''),
+      ('turso_url', ''),
+      ('turso_token', ''),
+      ('sync_enabled', '0'),
+      ('last_sync_at', ''),
+      ('last_sync_cursor', '0'),
+      ('last_sync_error', ''),
+      ('sync_applying_remote', '0');
+
+    CREATE TABLE IF NOT EXISTS sync_outbox (
+      table_name  TEXT NOT NULL,
+      sync_id     TEXT NOT NULL,
+      op          TEXT NOT NULL,
+      branch_id   TEXT NOT NULL DEFAULT 'main',
+      changed_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      PRIMARY KEY (table_name, sync_id)
+    ) WITHOUT ROWID;
+
+    -- Add sync metadata columns to all synced tables
+    ALTER TABLE sales ADD COLUMN sync_id TEXT;
+    ALTER TABLE sales ADD COLUMN device_name TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE expenses ADD COLUMN sync_id TEXT;
+    ALTER TABLE expenses ADD COLUMN device_name TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE ld_commissions ADD COLUMN sync_id TEXT;
+    ALTER TABLE ld_commissions ADD COLUMN device_name TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE commissions ADD COLUMN sync_id TEXT;
+    ALTER TABLE commissions ADD COLUMN device_name TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE salaries ADD COLUMN sync_id TEXT;
+    ALTER TABLE salaries ADD COLUMN device_name TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE employees ADD COLUMN sync_id TEXT;
+    ALTER TABLE employees ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+    ALTER TABLE employees ADD COLUMN device_name TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE categories ADD COLUMN sync_id TEXT;
+    ALTER TABLE categories ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+    ALTER TABLE categories ADD COLUMN device_name TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE branches ADD COLUMN sync_id TEXT;
+    ALTER TABLE branches ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+    ALTER TABLE branches ADD COLUMN device_name TEXT NOT NULL DEFAULT '';
+
+    -- Backfill deterministic sync_ids for seeded/natural-key tables and UUIDs for transaction tables
+    UPDATE branches
+      SET sync_id = 'branch:' || id,
+          updated_at = COALESCE(NULLIF(updated_at, ''), created_at)
+      WHERE sync_id IS NULL OR sync_id = '';
+
+    UPDATE categories
+      SET sync_id = 'cat:' || lower(branch_id) || ':' || lower(kind) || ':' || lower(name),
+          updated_at = COALESCE(NULLIF(updated_at, ''), created_at)
+      WHERE sync_id IS NULL OR sync_id = '';
+
+    UPDATE employees
+      SET sync_id = 'emp:' || lower(branch_id) || ':' || lower(name),
+          updated_at = COALESCE(NULLIF(updated_at, ''), created_at)
+      WHERE sync_id IS NULL OR sync_id = '';
+
+    UPDATE sales SET sync_id = lower(hex(randomblob(16))) WHERE sync_id IS NULL OR sync_id = '';
+    UPDATE expenses SET sync_id = lower(hex(randomblob(16))) WHERE sync_id IS NULL OR sync_id = '';
+    UPDATE ld_commissions SET sync_id = lower(hex(randomblob(16))) WHERE sync_id IS NULL OR sync_id = '';
+    UPDATE commissions SET sync_id = lower(hex(randomblob(16))) WHERE sync_id IS NULL OR sync_id = '';
+    UPDATE salaries SET sync_id = lower(hex(randomblob(16))) WHERE sync_id IS NULL OR sync_id = '';
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_sync_id ON sales(sync_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_sync_id ON expenses(sync_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ld_commissions_sync_id ON ld_commissions(sync_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_commissions_sync_id ON commissions(sync_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_salaries_sync_id ON salaries(sync_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_sync_id ON employees(sync_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_sync_id ON categories(sync_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_sync_id ON branches(sync_id);
+
+    -- Triggers for sales
+    CREATE TRIGGER IF NOT EXISTS trg_sales_ai AFTER INSERT ON sales
+    BEGIN
+      UPDATE sales
+      SET sync_id = COALESCE(NULLIF(sync_id, ''), lower(hex(randomblob(16)))),
+          device_name = CASE WHEN device_name = '' THEN COALESCE((SELECT value FROM local_settings WHERE key = 'device_name'), '') ELSE device_name END
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      SELECT 'sales', s.sync_id, 'UPSERT', s.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM sales s
+      WHERE s.rowid = NEW.rowid
+        AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_sales_au AFTER UPDATE ON sales
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND NEW.sync_id IS NOT NULL
+    BEGIN
+      UPDATE sales
+      SET device_name = COALESCE(NULLIF((SELECT value FROM local_settings WHERE key = 'device_name'), ''), device_name)
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('sales', NEW.sync_id, 'UPSERT', NEW.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_sales_ad AFTER DELETE ON sales
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND OLD.sync_id IS NOT NULL
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('sales', OLD.sync_id, 'DELETE', OLD.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    -- Triggers for expenses
+    CREATE TRIGGER IF NOT EXISTS trg_expenses_ai AFTER INSERT ON expenses
+    BEGIN
+      UPDATE expenses
+      SET sync_id = COALESCE(NULLIF(sync_id, ''), lower(hex(randomblob(16)))),
+          device_name = CASE WHEN device_name = '' THEN COALESCE((SELECT value FROM local_settings WHERE key = 'device_name'), '') ELSE device_name END
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      SELECT 'expenses', e.sync_id, 'UPSERT', e.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM expenses e
+      WHERE e.rowid = NEW.rowid
+        AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_expenses_au AFTER UPDATE ON expenses
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND NEW.sync_id IS NOT NULL
+    BEGIN
+      UPDATE expenses
+      SET device_name = COALESCE(NULLIF((SELECT value FROM local_settings WHERE key = 'device_name'), ''), device_name)
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('expenses', NEW.sync_id, 'UPSERT', NEW.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_expenses_ad AFTER DELETE ON expenses
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND OLD.sync_id IS NOT NULL
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('expenses', OLD.sync_id, 'DELETE', OLD.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    -- Triggers for ld_commissions
+    CREATE TRIGGER IF NOT EXISTS trg_ld_commissions_ai AFTER INSERT ON ld_commissions
+    BEGIN
+      UPDATE ld_commissions
+      SET sync_id = COALESCE(NULLIF(sync_id, ''), lower(hex(randomblob(16)))),
+          device_name = CASE WHEN device_name = '' THEN COALESCE((SELECT value FROM local_settings WHERE key = 'device_name'), '') ELSE device_name END
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      SELECT 'ld_commissions', l.sync_id, 'UPSERT', l.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM ld_commissions l
+      WHERE l.rowid = NEW.rowid
+        AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_ld_commissions_au AFTER UPDATE ON ld_commissions
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND NEW.sync_id IS NOT NULL
+    BEGIN
+      UPDATE ld_commissions
+      SET device_name = COALESCE(NULLIF((SELECT value FROM local_settings WHERE key = 'device_name'), ''), device_name)
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('ld_commissions', NEW.sync_id, 'UPSERT', NEW.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_ld_commissions_ad AFTER DELETE ON ld_commissions
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND OLD.sync_id IS NOT NULL
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('ld_commissions', OLD.sync_id, 'DELETE', OLD.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    -- Triggers for commissions
+    CREATE TRIGGER IF NOT EXISTS trg_commissions_ai AFTER INSERT ON commissions
+    BEGIN
+      UPDATE commissions
+      SET sync_id = COALESCE(NULLIF(sync_id, ''), lower(hex(randomblob(16)))),
+          device_name = CASE WHEN device_name = '' THEN COALESCE((SELECT value FROM local_settings WHERE key = 'device_name'), '') ELSE device_name END
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      SELECT 'commissions', c.sync_id, 'UPSERT', c.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM commissions c
+      WHERE c.rowid = NEW.rowid
+        AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_commissions_au AFTER UPDATE ON commissions
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND NEW.sync_id IS NOT NULL
+    BEGIN
+      UPDATE commissions
+      SET device_name = COALESCE(NULLIF((SELECT value FROM local_settings WHERE key = 'device_name'), ''), device_name)
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('commissions', NEW.sync_id, 'UPSERT', NEW.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_commissions_ad AFTER DELETE ON commissions
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND OLD.sync_id IS NOT NULL
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('commissions', OLD.sync_id, 'DELETE', OLD.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    -- Triggers for salaries
+    CREATE TRIGGER IF NOT EXISTS trg_salaries_ai AFTER INSERT ON salaries
+    BEGIN
+      UPDATE salaries
+      SET sync_id = COALESCE(NULLIF(sync_id, ''), lower(hex(randomblob(16)))),
+          device_name = CASE WHEN device_name = '' THEN COALESCE((SELECT value FROM local_settings WHERE key = 'device_name'), '') ELSE device_name END
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      SELECT 'salaries', s.sync_id, 'UPSERT', s.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM salaries s
+      WHERE s.rowid = NEW.rowid
+        AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_salaries_au AFTER UPDATE ON salaries
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND NEW.sync_id IS NOT NULL
+    BEGIN
+      UPDATE salaries
+      SET device_name = COALESCE(NULLIF((SELECT value FROM local_settings WHERE key = 'device_name'), ''), device_name)
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('salaries', NEW.sync_id, 'UPSERT', NEW.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_salaries_ad AFTER DELETE ON salaries
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND OLD.sync_id IS NOT NULL
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('salaries', OLD.sync_id, 'DELETE', OLD.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    -- Triggers for employees
+    CREATE TRIGGER IF NOT EXISTS trg_employees_ai AFTER INSERT ON employees
+    BEGIN
+      UPDATE employees
+      SET sync_id = COALESCE(NULLIF(sync_id, ''), 'emp:' || lower(branch_id) || ':' || lower(name)),
+          updated_at = COALESCE(NULLIF(updated_at, ''), datetime('now','localtime')),
+          device_name = CASE WHEN device_name = '' THEN COALESCE((SELECT value FROM local_settings WHERE key = 'device_name'), '') ELSE device_name END
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      SELECT 'employees', e.sync_id, 'UPSERT', e.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM employees e
+      WHERE e.rowid = NEW.rowid
+        AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_employees_au AFTER UPDATE ON employees
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND NEW.sync_id IS NOT NULL
+    BEGIN
+      UPDATE employees
+      SET updated_at = datetime('now','localtime'),
+          device_name = COALESCE(NULLIF((SELECT value FROM local_settings WHERE key = 'device_name'), ''), device_name)
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('employees', NEW.sync_id, 'UPSERT', NEW.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_employees_ad AFTER DELETE ON employees
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND OLD.sync_id IS NOT NULL
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('employees', OLD.sync_id, 'DELETE', OLD.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    -- Triggers for categories
+    CREATE TRIGGER IF NOT EXISTS trg_categories_ai AFTER INSERT ON categories
+    BEGIN
+      UPDATE categories
+      SET sync_id = COALESCE(NULLIF(sync_id, ''), 'cat:' || lower(branch_id) || ':' || lower(kind) || ':' || lower(name)),
+          updated_at = COALESCE(NULLIF(updated_at, ''), datetime('now','localtime')),
+          device_name = CASE WHEN device_name = '' THEN COALESCE((SELECT value FROM local_settings WHERE key = 'device_name'), '') ELSE device_name END
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      SELECT 'categories', c.sync_id, 'UPSERT', c.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM categories c
+      WHERE c.rowid = NEW.rowid
+        AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_categories_au AFTER UPDATE ON categories
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND NEW.sync_id IS NOT NULL
+    BEGIN
+      UPDATE categories
+      SET updated_at = datetime('now','localtime'),
+          device_name = COALESCE(NULLIF((SELECT value FROM local_settings WHERE key = 'device_name'), ''), device_name)
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('categories', NEW.sync_id, 'UPSERT', NEW.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_categories_ad AFTER DELETE ON categories
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND OLD.sync_id IS NOT NULL
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('categories', OLD.sync_id, 'DELETE', OLD.branch_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    -- Triggers for branches
+    CREATE TRIGGER IF NOT EXISTS trg_branches_ai AFTER INSERT ON branches
+    BEGIN
+      UPDATE branches
+      SET sync_id = COALESCE(NULLIF(sync_id, ''), 'branch:' || id),
+          updated_at = COALESCE(NULLIF(updated_at, ''), datetime('now','localtime')),
+          device_name = CASE WHEN device_name = '' THEN COALESCE((SELECT value FROM local_settings WHERE key = 'device_name'), '') ELSE device_name END
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      SELECT 'branches', b.sync_id, 'UPSERT', b.id, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM branches b
+      WHERE b.rowid = NEW.rowid
+        AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_branches_au AFTER UPDATE ON branches
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND NEW.sync_id IS NOT NULL
+    BEGIN
+      UPDATE branches
+      SET updated_at = datetime('now','localtime'),
+          device_name = COALESCE(NULLIF((SELECT value FROM local_settings WHERE key = 'device_name'), ''), device_name)
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('branches', NEW.sync_id, 'UPSERT', NEW.id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_branches_ad AFTER DELETE ON branches
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND OLD.sync_id IS NOT NULL
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('branches', OLD.sync_id, 'DELETE', OLD.id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    -- Triggers for shared admin_pin in app_settings (active_branch lives in local_settings)
+    CREATE TRIGGER IF NOT EXISTS trg_app_settings_ai AFTER INSERT ON app_settings
+    WHEN NEW.key = 'admin_pin'
+      AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('app_settings', 'admin_pin', 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_app_settings_au AFTER UPDATE ON app_settings
+    WHEN NEW.key = 'admin_pin'
+      AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('app_settings', 'admin_pin', 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+    "#,
 ];
 
 /// Latest schema version known to this build.
@@ -237,11 +613,80 @@ mod tests {
         let tables: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
-                 ('sales','expenses','ld_commissions','commissions','salaries','employees','categories','branches','app_settings')",
+                 ('sales','expenses','ld_commissions','commissions','salaries','employees','categories','branches','app_settings','local_settings','sync_outbox')",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables, 9);
+        assert_eq!(tables, 11);
+    }
+
+    #[test]
+    fn v5_triggers_queue_outbox_and_preserve_rowid() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run(&mut conn).unwrap();
+
+        conn.execute(
+            "INSERT OR REPLACE INTO local_settings (key, value) VALUES ('device_name', 'Cashier-1')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO sales (category, amount, sale_date, branch_id) VALUES ('Food', 5000, '2026-10-13', 'main')",
+            [],
+        )
+        .unwrap();
+        let row_id = conn.last_insert_rowid();
+        assert!(row_id > 0);
+
+        let (sync_id, dev): (String, String) = conn
+            .query_row(
+                "SELECT sync_id, device_name FROM sales WHERE id = ?1",
+                [row_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(!sync_id.is_empty());
+        assert_eq!(dev, "Cashier-1");
+
+        let op: String = conn
+            .query_row(
+                "SELECT op FROM sync_outbox WHERE table_name = 'sales' AND sync_id = ?1",
+                [&sync_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(op, "UPSERT");
+
+        conn.execute("DELETE FROM sales WHERE id = ?1", [row_id]).unwrap();
+        let op_after: String = conn
+            .query_row(
+                "SELECT op FROM sync_outbox WHERE table_name = 'sales' AND sync_id = ?1",
+                [&sync_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(op_after, "DELETE");
+
+        // Remote apply flag suppresses outbox queueing
+        conn.execute(
+            "UPDATE local_settings SET value = '1' WHERE key = 'sync_applying_remote'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sales (category, amount, sale_date, branch_id, sync_id, device_name) VALUES ('Beer', 2000, '2026-10-13', 'main', 'remote-uuid-1', 'Laptop-2')",
+            [],
+        )
+        .unwrap();
+        let queued: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sync_outbox WHERE sync_id = 'remote-uuid-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(queued, 0);
     }
 }

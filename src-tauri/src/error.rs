@@ -18,11 +18,18 @@ pub enum AppError {
 
     #[error("The database is busy. Please try again.")]
     Lock,
+
+    #[error("Sync error: {0}")]
+    Sync(String),
 }
 
 impl AppError {
     pub fn validation(msg: impl Into<String>) -> Self {
         AppError::Validation(msg.into())
+    }
+
+    pub fn sync(msg: impl Into<String>) -> Self {
+        AppError::Sync(msg.into())
     }
 }
 

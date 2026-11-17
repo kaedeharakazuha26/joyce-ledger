@@ -173,13 +173,38 @@ pub fn restore_from(dest_conn: &mut Connection, backup_path: &str) -> AppResult<
 #[tauri::command]
 pub fn restore_database(state: State<'_, DbState>, path: String) -> AppResult<()> {
     let mut conn = state.conn()?;
+    // Preserve this device's local sync & device identity settings across restore
+    let preserved_local: Vec<(String, String)> = conn
+        .prepare("SELECT key, value FROM local_settings WHERE key IN ('device_name','turso_url','turso_token','sync_enabled')")
+        .and_then(|mut s| {
+            s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .unwrap_or_default();
+
     restore_from(&mut *conn, &path)?;
+
+    for (k, v) in preserved_local {
+        let _ = conn.execute(
+            "INSERT INTO local_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now','localtime'))
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            rusqlite::params![k, v],
+        );
+    }
+
     let active = conn
         .query_row(
-            "SELECT value FROM app_settings WHERE key = 'active_branch'",
+            "SELECT value FROM local_settings WHERE key = 'active_branch'",
             [],
             |r| r.get::<_, String>(0),
         )
+        .or_else(|_| {
+            conn.query_row(
+                "SELECT value FROM app_settings WHERE key = 'active_branch'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+        })
         .unwrap_or_else(|_| "main".to_string());
     state.set_active_branch(&active)?;
     Ok(())

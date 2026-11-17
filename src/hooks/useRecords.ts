@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useBranch } from "../context/BranchContext";
-import { errorMessage, recordApi } from "../lib/api";
+import { errorMessage, onSyncEvent, recordApi } from "../lib/api";
 import type { BaseRecord, DateFilter, ModuleKey, Totals } from "../types/models";
 
 /**
@@ -34,6 +34,8 @@ export function useRecords<T extends BaseRecord & { quantity?: number }, I>(
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => onSyncEvent("sync-updated", () => void reload()), [reload]);
 
   const create = useCallback(
     async (input: I) => {

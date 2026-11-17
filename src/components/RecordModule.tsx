@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { useBranch } from "../context/BranchContext";
-import { addCategory, employeesApi, errorMessage, exportCsv } from "../lib/api";
+import { addCategory, employeesApi, errorMessage, exportCsv, onSyncEvent } from "../lib/api";
 import { describeRange, isValidIsoDate, rangeSlug, todayFilter, todayLocal } from "../lib/dates";
 import { centavosToInput, formatMoney, MAX_CENTAVOS, parsePesos } from "../lib/money";
 import { useRecords } from "../hooks/useRecords";
@@ -142,6 +142,8 @@ export function RecordModule<T extends AnyRecord>({
   useEffect(() => {
     void reloadEmployees();
   }, [reloadEmployees]);
+
+  useEffect(() => onSyncEvent("sync-updated", () => void reloadEmployees()), [reloadEmployees]);
 
   const [values, setValues] = useState<Values>(() => blankValues(fields));
   const [errors, setErrors] = useState<Record<string, string>>({});

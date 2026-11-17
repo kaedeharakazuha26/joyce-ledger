@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import logoImg from "../assets/logo.webp";
 import { PageHeader } from "../components/AppLayout";
@@ -9,11 +9,19 @@ import { useBranch } from "../context/BranchContext";
 import {
   backupDatabase,
   changeAdminPin,
+  disconnectTurso,
   errorMessage,
+  getSyncSettings,
+  onSyncEvent,
   resetDatabase,
   restoreDatabase,
+  saveDeviceName,
+  saveTursoSettings,
+  syncNow,
+  testTursoConnection,
 } from "../lib/api";
 import { todayLocal } from "../lib/dates";
+import type { SyncStatus } from "../types/models";
 
 export function SettingsPage() {
   const toast = useToast();
@@ -52,6 +60,147 @@ export function SettingsPage() {
   const [deletePin, setDeletePin] = useState("");
   const [showDeletePin, setShowDeletePin] = useState(false);
   const [deletingBranchState, setDeletingBranchState] = useState(false);
+
+  // Cloud Sync (Turso) & Device Identity states
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [deviceNameInput, setDeviceNameInput] = useState("");
+  const [savingDeviceName, setSavingDeviceName] = useState(false);
+  const [tursoUrl, setTursoUrl] = useState("");
+  const [tursoToken, setTursoToken] = useState("");
+  const [showTursoToken, setShowTursoToken] = useState(false);
+  const [tursoPin, setTursoPin] = useState("");
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [savingTurso, setSavingTurso] = useState(false);
+  const [syncingNow, setSyncingNow] = useState(false);
+  const [disconnectingTurso, setDisconnectingTurso] = useState(false);
+
+  const loadSyncStatus = useCallback(async (hydrateInputs = false) => {
+    try {
+      const s = await getSyncSettings();
+      setSyncStatus(s);
+      if (hydrateInputs) {
+        setDeviceNameInput(s.deviceName);
+        setTursoUrl(s.tursoUrl);
+      }
+    } catch {
+      // Ignore outside Tauri runtime
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSyncStatus(true);
+  }, [loadSyncStatus]);
+
+  useEffect(() => {
+    const un1 = onSyncEvent("sync-status", () => void loadSyncStatus(false));
+    const un2 = onSyncEvent("sync-updated", () => void loadSyncStatus(false));
+    return () => {
+      un1();
+      un2();
+    };
+  }, [loadSyncStatus]);
+
+  const handleSaveDeviceName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deviceNameInput.trim()) {
+      toast.error("Device name cannot be empty.");
+      return;
+    }
+    setSavingDeviceName(true);
+    try {
+      const updated = await saveDeviceName(deviceNameInput.trim());
+      setSyncStatus(updated);
+      setDeviceNameInput(updated.deviceName);
+      toast.success(`Device renamed to "${updated.deviceName}".`);
+    } catch (err) {
+      toast.error(`Failed to save device name: ${errorMessage(err)}`);
+    } finally {
+      setSavingDeviceName(false);
+    }
+  };
+
+  const handleTestTurso = async () => {
+    if (!tursoUrl.trim()) {
+      toast.error("Enter a Turso Database URL first.");
+      return;
+    }
+    if (!tursoToken.trim() && !syncStatus?.hasToken) {
+      toast.error("Enter your Turso Auth Token.");
+      return;
+    }
+    setTestingConnection(true);
+    try {
+      const msg = await testTursoConnection(tursoUrl.trim(), tursoToken.trim());
+      toast.success(msg);
+    } catch (err) {
+      toast.error(`Connection test failed: ${errorMessage(err)}`);
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleSaveTurso = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tursoUrl.trim()) {
+      toast.error("Turso Database URL is required.");
+      return;
+    }
+    if (!tursoToken.trim() && !syncStatus?.hasToken) {
+      toast.error("Turso Auth Token is required.");
+      return;
+    }
+    if (!tursoPin.trim()) {
+      toast.error("Enter the Admin PIN to apply cloud database settings.");
+      return;
+    }
+    setSavingTurso(true);
+    try {
+      const updated = await saveTursoSettings(tursoUrl.trim(), tursoToken.trim(), tursoPin.trim());
+      setSyncStatus(updated);
+      setTursoToken("");
+      setTursoPin("");
+      await refreshBranches();
+      toast.success("Turso cloud sync connected! All laptops sharing this database will now sync automatically.");
+    } catch (err) {
+      toast.error(`Failed to connect Turso: ${errorMessage(err)}`);
+    } finally {
+      setSavingTurso(false);
+    }
+  };
+
+  const handleSyncNow = async () => {
+    setSyncingNow(true);
+    try {
+      const updated = await syncNow();
+      setSyncStatus(updated);
+      await refreshBranches();
+      toast.success("Synced with Turso cloud database.");
+    } catch (err) {
+      await loadSyncStatus(false);
+      toast.error(`Sync failed: ${errorMessage(err)}`);
+    } finally {
+      setSyncingNow(false);
+    }
+  };
+
+  const handleDisconnectTurso = async () => {
+    if (!tursoPin.trim()) {
+      toast.error("Enter the Admin PIN to disconnect Turso cloud sync.");
+      return;
+    }
+    setDisconnectingTurso(true);
+    try {
+      const updated = await disconnectTurso(tursoPin.trim());
+      setSyncStatus(updated);
+      setTursoToken("");
+      setTursoPin("");
+      toast.success("Disconnected from Turso. This laptop is now in Local Offline mode.");
+    } catch (err) {
+      toast.error(`Disconnect failed: ${errorMessage(err)}`);
+    } finally {
+      setDisconnectingTurso(false);
+    }
+  };
 
   // Non-main branches eligible for deletion
   const customBranches = branches.filter((b) => b.id !== "main");
@@ -242,6 +391,215 @@ export function SettingsPage() {
       />
 
       <div className="space-y-6">
+        {/* Cloud Sync (Turso) & Multi-Laptop Setup Card */}
+        <section className="card overflow-hidden border-amber-500/25 p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                  Cloud Sync (Turso) &amp; Multi-Laptop Setup
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Connect 3–10 laptops to one shared Turso database. Saves locally first so entry never locks or pauses even if Wi-Fi drops.
+                </p>
+              </div>
+            </div>
+
+            {syncStatus?.syncEnabled ? (
+              syncStatus.lastSyncError ? (
+                <span className="inline-flex items-center gap-2 rounded-full border border-amber-300/70 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-300">
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  Offline · {syncStatus.pendingChanges} queued
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/70 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-300">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  {syncStatus.pendingChanges > 0
+                    ? `Syncing (${syncStatus.pendingChanges} pending)`
+                    : "Connected & Synced"}
+                </span>
+              )
+            ) : (
+              <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                <span className="h-2 w-2 rounded-full bg-slate-400" />
+                Local Offline Mode
+              </span>
+            )}
+          </div>
+
+          {/* Device Identity Form */}
+          <form onSubmit={(e) => void handleSaveDeviceName(e)} className="mt-5 rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[240px] flex-1">
+                <label htmlFor="settings-device-name" className="label">
+                  This Laptop&apos;s Device Name
+                </label>
+                <p className="mb-1.5 text-xs text-slate-500 dark:text-slate-400">
+                  Unique name for this computer (e.g. &ldquo;Main Cashier 1&rdquo;, &ldquo;Branch 2 Desk&rdquo;). Shown in the sidebar and tracked on synced records.
+                </p>
+                <input
+                  id="settings-device-name"
+                  type="text"
+                  required
+                  maxLength={60}
+                  placeholder="e.g. Main Cashier Laptop"
+                  value={deviceNameInput}
+                  onChange={(e) => setDeviceNameInput(e.target.value)}
+                  className="input"
+                />
+              </div>
+              <button
+                type="submit"
+                id="settings-save-device-btn"
+                disabled={savingDeviceName || !deviceNameInput.trim()}
+                className="btn-secondary h-12 px-5 text-sm font-semibold"
+              >
+                {savingDeviceName ? "Saving…" : "Save Device Name"}
+              </button>
+            </div>
+          </form>
+
+          {/* Turso Credentials Form */}
+          <form onSubmit={(e) => void handleSaveTurso(e)} className="mt-5 space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label htmlFor="settings-turso-url" className="label">
+                  Turso Database URL
+                </label>
+                <input
+                  id="settings-turso-url"
+                  type="text"
+                  placeholder="libsql://your-ledger-db.turso.io"
+                  value={tursoUrl}
+                  onChange={(e) => setTursoUrl(e.target.value)}
+                  className="input font-mono text-sm"
+                />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Use one Turso database for all branches (entries are separated automatically by branch).
+                </p>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="settings-turso-token" className="label">
+                    Turso Auth Token
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowTursoToken(!showTursoToken)}
+                    className="text-xs font-semibold text-amber-600 hover:text-amber-500 dark:text-amber-400"
+                  >
+                    {showTursoToken ? "Hide Token" : "Show Token"}
+                  </button>
+                </div>
+                <input
+                  id="settings-turso-token"
+                  type={showTursoToken ? "text" : "password"}
+                  placeholder={
+                    syncStatus?.hasToken
+                      ? `Saved (${syncStatus.tursoTokenMasked}) — leave blank to keep`
+                      : "Paste Turso read-write auth token…"
+                  }
+                  value={tursoToken}
+                  onChange={(e) => setTursoToken(e.target.value)}
+                  className="input font-mono text-sm"
+                />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Stored locally on this laptop only. Never synced across devices.
+                </p>
+              </div>
+            </div>
+
+            {/* Status & PIN Row */}
+            <div className="flex flex-wrap items-end justify-between gap-4 rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <div className="w-full sm:w-56">
+                <label htmlFor="settings-turso-pin" className="label text-xs uppercase tracking-wider">
+                  Admin PIN (to save/disconnect)
+                </label>
+                <input
+                  id="settings-turso-pin"
+                  type="password"
+                  placeholder="PIN (default 0000)"
+                  value={tursoPin}
+                  onChange={(e) => setTursoPin(e.target.value)}
+                  className="input h-10 font-mono tracking-widest text-sm"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  id="settings-test-turso-btn"
+                  onClick={() => void handleTestTurso()}
+                  disabled={testingConnection || !tursoUrl.trim()}
+                  className="btn-secondary h-10 px-4 text-xs font-semibold"
+                >
+                  {testingConnection ? "Testing…" : "Test Connection"}
+                </button>
+
+                {syncStatus?.syncEnabled && (
+                  <>
+                    <button
+                      type="button"
+                      id="settings-sync-now-btn"
+                      onClick={() => void handleSyncNow()}
+                      disabled={syncingNow}
+                      className="btn h-10 border border-emerald-500/30 bg-emerald-500/10 px-4 text-xs font-bold text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300"
+                    >
+                      {syncingNow ? "Syncing…" : "Sync Now"}
+                    </button>
+                    <button
+                      type="button"
+                      id="settings-disconnect-turso-btn"
+                      onClick={() => void handleDisconnectTurso()}
+                      disabled={disconnectingTurso || !tursoPin.trim()}
+                      className="btn h-10 border border-rose-300 bg-white px-4 text-xs font-semibold text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:bg-slate-900 dark:text-rose-300 dark:hover:bg-rose-950/50"
+                    >
+                      {disconnectingTurso ? "Disconnecting…" : "Disconnect"}
+                    </button>
+                  </>
+                )}
+
+                <button
+                  type="submit"
+                  id="settings-save-turso-btn"
+                  disabled={savingTurso || !tursoUrl.trim() || !tursoPin.trim()}
+                  className="btn-primary h-10 px-5 text-xs font-bold"
+                >
+                  {savingTurso ? "Connecting…" : syncStatus?.syncEnabled ? "Update & Sync" : "Save & Connect Turso"}
+                </button>
+              </div>
+            </div>
+
+            {syncStatus?.syncEnabled && (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span>
+                  Last synced:{" "}
+                  <strong className="text-slate-700 dark:text-slate-200">
+                    {syncStatus.lastSyncAt || "Waiting for first sync…"}
+                  </strong>
+                </span>
+                <span>
+                  Pending local changes:{" "}
+                  <strong className="font-mono text-slate-700 dark:text-slate-200">
+                    {syncStatus.pendingChanges}
+                  </strong>
+                </span>
+                {syncStatus.lastSyncError && (
+                  <span className="w-full rounded-lg border border-amber-300/60 bg-amber-50/70 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-300">
+                    Last sync note: {syncStatus.lastSyncError}
+                  </span>
+                )}
+              </div>
+            )}
+          </form>
+        </section>
+
         {/* Admin Security PIN Card */}
         <section className="card overflow-hidden p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
@@ -611,14 +969,26 @@ export function SettingsPage() {
 
           <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Application</p>
-              <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">Joyce Restobar Ledger</p>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Device Identity</p>
+              <p className="mt-1 truncate font-semibold text-slate-900 dark:text-slate-100">
+                {syncStatus?.deviceName || "Restobar Laptop"}
+              </p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Network & Storage</p>
               <div className="mt-1 flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400">100% Offline (SQLite)</span>
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    syncStatus?.syncEnabled
+                      ? syncStatus.lastSyncError
+                        ? "bg-amber-500"
+                        : "bg-emerald-500 animate-pulse"
+                      : "bg-emerald-500"
+                  }`}
+                />
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  {syncStatus?.syncEnabled ? "Turso Cloud + Offline Sync" : "100% Offline (SQLite)"}
+                </span>
               </div>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-950/40">

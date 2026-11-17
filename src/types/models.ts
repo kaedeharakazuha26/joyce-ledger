@@ -96,3 +96,14 @@ export interface Branch {
   name: string;
   createdAt: string;
 }
+
+export interface SyncStatus {
+  deviceName: string;
+  tursoUrl: string;
+  tursoTokenMasked: string;
+  hasToken: boolean;
+  syncEnabled: boolean;
+  pendingChanges: number;
+  lastSyncAt: string | null;
+  lastSyncError: string | null;
+}

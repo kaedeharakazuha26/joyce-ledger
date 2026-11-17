@@ -4,6 +4,7 @@ import {
   deleteBranch as apiDeleteBranch,
   getActiveBranch,
   listBranches,
+  onSyncEvent,
   setActiveBranch as apiSetActiveBranch,
   updateBranch as apiUpdateBranch,
 } from "../lib/api";
@@ -43,6 +44,8 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     void refreshBranches();
   }, [refreshBranches]);
+
+  useEffect(() => onSyncEvent("sync-updated", () => void refreshBranches()), [refreshBranches]);
 
   const switchBranch = useCallback(
     async (branchId: string) => {

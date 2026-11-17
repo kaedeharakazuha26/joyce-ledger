@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import logoImg from "../assets/logo.webp";
 import { useBranch } from "../context/BranchContext";
+import { errorMessage, getSyncSettings, onSyncEvent, syncNow } from "../lib/api";
+import type { SyncStatus } from "../types/models";
 import { Modal } from "./Modal";
 import { useToast } from "./Toast";
 
@@ -41,6 +43,43 @@ export function Sidebar() {
   const [addBranchOpen, setAddBranchOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
   const [addingBranch, setAddingBranch] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const loadSync = useCallback(async () => {
+    try {
+      setSyncStatus(await getSyncSettings());
+    } catch {
+      // Ignore outside Tauri runtime
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSync();
+    const un1 = onSyncEvent("sync-status", () => void loadSync());
+    const un2 = onSyncEvent("sync-updated", () => void loadSync());
+    const timer = window.setInterval(() => void loadSync(), 5000);
+    return () => {
+      un1();
+      un2();
+      window.clearInterval(timer);
+    };
+  }, [loadSync]);
+
+  const handleQuickSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const updated = await syncNow();
+      setSyncStatus(updated);
+      toast.success("Synced with Turso cloud.");
+    } catch (err) {
+      await loadSync();
+      toast.error(`Sync failed: ${errorMessage(err)}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleSelectBranch = async (branchId: string) => {
     if (branchId === currentBranchId) {
@@ -217,7 +256,7 @@ export function Sidebar() {
           to="/settings"
           id="nav-settings"
           className={({ isActive }) =>
-            `flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-all duration-200 ${
+            `flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-colors duration-200 ${
               isActive
                 ? "bg-gradient-to-r from-amber-500 via-brand-500 to-amber-600 text-slate-950 font-bold shadow-md shadow-amber-500/25"
                 : "border border-amber-500/20 bg-amber-500/5 text-amber-200 hover:bg-amber-500/10 hover:border-amber-500/40"
@@ -227,9 +266,55 @@ export function Sidebar() {
           <Icon path={ICONS.settings} />
           Settings & Database
         </NavLink>
-        <p className="text-center text-[10px] text-slate-500 font-medium">
-          Offline Mode · Joyce Restobar
-        </p>
+
+        {/* Device & Sync Status Indicator */}
+        <div className="rounded-xl border border-slate-800/90 bg-slate-950/60 px-3 py-2 text-[11px]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate font-semibold text-slate-300" title={syncStatus?.deviceName || "Restobar Laptop"}>
+              {syncStatus?.deviceName || "Restobar Laptop"}
+            </span>
+            {syncStatus?.syncEnabled && (
+              <button
+                type="button"
+                onClick={() => void handleQuickSync()}
+                disabled={syncing}
+                title="Sync now with Turso"
+                className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-amber-300 hover:bg-amber-500/15 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              >
+                {syncing ? "Syncing…" : "Sync"}
+              </button>
+            )}
+          </div>
+          <div className="mt-1 flex items-center gap-1.5 text-[10px] font-medium">
+            {syncStatus?.syncEnabled ? (
+              syncStatus.lastSyncError ? (
+                <>
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                  <span className="truncate text-amber-300">
+                    Offline · {syncStatus.pendingChanges} queued
+                  </span>
+                </>
+              ) : syncStatus.pendingChanges > 0 ? (
+                <>
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="truncate text-amber-300">
+                    Syncing {syncStatus.pendingChanges} pending
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                  <span className="truncate text-emerald-300">Turso Cloud Synced</span>
+                </>
+              )
+            ) : (
+              <>
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500" />
+                <span className="truncate text-slate-400">Local Offline Mode</span>
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Modal to Add New Branch */}

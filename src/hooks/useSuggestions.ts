@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useBranch } from "../context/BranchContext";
-import { getSuggestions } from "../lib/api";
+import { getSuggestions, onSyncEvent } from "../lib/api";
 import type { SuggestionKind } from "../types/models";
 
 /** Loads autocomplete values for the given kinds; call `refresh` after saving. */
@@ -22,6 +22,8 @@ export function useSuggestions(kinds: SuggestionKind[]) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => onSyncEvent("sync-updated", () => void refresh()), [refresh]);
 
   return { values, refresh };
 }

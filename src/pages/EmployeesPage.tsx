@@ -7,7 +7,7 @@ import { MoneyInput } from "../components/MoneyInput";
 import { TextInput } from "../components/TextInput";
 import { useToast } from "../components/Toast";
 import { useBranch } from "../context/BranchContext";
-import { employeesApi, errorMessage } from "../lib/api";
+import { employeesApi, errorMessage, onSyncEvent } from "../lib/api";
 import { centavosToInput, formatMoney, parsePesos } from "../lib/money";
 import type { Employee } from "../types/models";
 
@@ -76,6 +76,8 @@ export function EmployeesPage() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => onSyncEvent("sync-updated", () => void reload()), [reload]);
 
   const reset = useCallback(() => {
     setEditing(null);

@@ -2,16 +2,21 @@ import logoImg from "../assets/logo.webp";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CashFlowChart,
+  CashflowSankeyCard,
   CategoryBreakdown,
+  NetProfitTrendCard,
+  OutflowsDonutCard,
+  SalesVsOutflowsCard,
   StaffRankChart,
   type CategoryBreakdownItem,
   type DailyDataPoint,
+  type OutflowRowItem,
 } from "../components/Charts";
 import { DateRangeFilter } from "../components/DateRangeFilter";
 import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/AppLayout";
 import { useBranch } from "../context/BranchContext";
-import { employeesApi, recordApi } from "../lib/api";
+import { employeesApi, onSyncEvent, recordApi } from "../lib/api";
 import { describeRange, formatDisplayDate, todayFilter } from "../lib/dates";
 import { formatMoney } from "../lib/money";
 import type { Commission, DateFilter, Employee, Expense, LdCommission, Salary, Sale } from "../types/models";
@@ -81,6 +86,8 @@ export function DashboardPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => onSyncEvent("sync-updated", () => void loadData()), [loadData]);
 
   // Aggregate Totals
   const totalSales = useMemo(() => sales.reduce((acc, r) => acc + r.amount, 0), [sales]);
@@ -181,6 +188,30 @@ export function DashboardPage() {
       }))
       .sort((a, b) => b.amount - a.amount);
   }, [expenses, totalExpenses]);
+
+  // Combined Outflows Breakdown for the Donut + Categories Table
+  const outflowBreakdownItems: OutflowRowItem[] = useMemo(() => {
+    if (totalOutflows === 0) return [];
+    const list: { category: string; amount: number }[] = [];
+    const expMap = new Map<string, number>();
+    expenses.forEach((e) => {
+      expMap.set(e.category, (expMap.get(e.category) || 0) + e.amount);
+    });
+    expMap.forEach((amount, category) => {
+      if (amount > 0) list.push({ category, amount });
+    });
+    if (totalSalaries > 0) list.push({ category: "Salaries Paid", amount: totalSalaries });
+    if (totalLdAmount > 0) list.push({ category: "LD Commissions", amount: totalLdAmount });
+    if (totalCommissions > 0) list.push({ category: "Regular Commissions", amount: totalCommissions });
+
+    return list
+      .map((item) => ({
+        category: item.category,
+        amount: item.amount,
+        percentage: (item.amount / totalOutflows) * 100,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [expenses, totalSalaries, totalLdAmount, totalCommissions, totalOutflows]);
 
   // Staff Payout Breakdown
   const staffSummaries: StaffSummary[] = useMemo(() => {
@@ -321,7 +352,7 @@ export function DashboardPage() {
                 </span>
               </div>
               <p className="mt-0.5 text-xs text-slate-400 truncate">
-                Live Offline Ledger · Filtered: <span className="font-semibold text-slate-200">{describeRange(filter)}</span>
+                Joyce Restobar Ledger · Filtered: <span className="font-semibold text-slate-200">{describeRange(filter)}</span>
               </p>
             </div>
           </div>
@@ -340,6 +371,32 @@ export function DashboardPage() {
       {/* Date Filter Bar */}
       <div className="card card-hover mb-6 p-5">
         <DateRangeFilter idPrefix="dashboard" value={filter} onChange={setFilter} />
+      </div>
+
+      {/* Black-Gold 2x2 Visual Analytics Grid */}
+      <div className="mb-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <CashflowSankeyCard
+          salesCategories={salesCategories}
+          totalSales={totalSales}
+          totalExpenses={totalExpenses}
+          totalLdAmount={totalLdAmount}
+          totalCommissions={totalCommissions}
+          totalSalaries={totalSalaries}
+          netProfit={netProfit}
+        />
+        <NetProfitTrendCard
+          data={dailyData}
+          netProfit={netProfit}
+          profitMargin={profitMargin}
+          rangeLabel={describeRange(filter)}
+        />
+        <SalesVsOutflowsCard
+          data={dailyData}
+          totalSales={totalSales}
+          totalOutflows={totalOutflows}
+          rangeLabel={describeRange(filter)}
+        />
+        <OutflowsDonutCard items={outflowBreakdownItems} totalOutflows={totalOutflows} />
       </div>
 
       {/* Executive Financial Stat Cards */}

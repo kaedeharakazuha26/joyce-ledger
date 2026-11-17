@@ -1,4 +1,5 @@
 pub mod migrations;
+pub mod sync;
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -15,12 +16,20 @@ pub struct DbState {
 
 impl DbState {
     pub fn new(conn: Connection) -> Self {
+        let _ = sync::ensure_default_device_name(&conn);
         let active = conn
             .query_row(
-                "SELECT value FROM app_settings WHERE key = 'active_branch'",
+                "SELECT value FROM local_settings WHERE key = 'active_branch'",
                 [],
                 |r| r.get::<_, String>(0),
             )
+            .or_else(|_| {
+                conn.query_row(
+                    "SELECT value FROM app_settings WHERE key = 'active_branch'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+            })
             .unwrap_or_else(|_| "main".to_string());
         Self {
             conn: Mutex::new(conn),

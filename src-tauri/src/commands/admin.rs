@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
+use crate::db::sync::{self, SyncStatus};
 use crate::db::DbState;
 use crate::error::{AppError, AppResult};
 use crate::models::{require_text, Branch};
@@ -101,7 +102,7 @@ pub fn set_active_branch(state: State<'_, DbState>, branch_id: String) -> AppRes
     }
 
     conn.execute(
-        "INSERT INTO app_settings (key, value, updated_at) VALUES ('active_branch', ?1, datetime('now','localtime'))
+        "INSERT INTO local_settings (key, value, updated_at) VALUES ('active_branch', ?1, datetime('now','localtime'))
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         params![branch_id],
     )?;
@@ -264,7 +265,8 @@ pub fn delete_branch(
     if let Ok(current) = state.active_branch() {
         if current == branch_id {
             let _ = conn.execute(
-                "UPDATE app_settings SET value = 'main', updated_at = datetime('now','localtime') WHERE key = 'active_branch'",
+                "INSERT INTO local_settings (key, value, updated_at) VALUES ('active_branch', 'main', datetime('now','localtime'))
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
                 [],
             );
             let _ = state.set_active_branch("main");
@@ -272,6 +274,137 @@ pub fn delete_branch(
     }
 
     Ok(())
+}
+
+// ---------- Cloud Sync (Turso) & Device Identity Commands ----------
+
+#[tauri::command]
+pub fn get_sync_settings(state: State<'_, DbState>) -> AppResult<SyncStatus> {
+    let conn = state.conn()?;
+    sync::get_sync_status(&conn)
+}
+
+#[tauri::command]
+pub fn save_device_name(
+    app: AppHandle,
+    state: State<'_, DbState>,
+    device_name: String,
+) -> AppResult<SyncStatus> {
+    let status = {
+        let conn = state.conn()?;
+        sync::set_device_name(&conn, &device_name)?
+    };
+    let _ = app.emit("sync-status", ());
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn test_turso_connection(
+    state: State<'_, DbState>,
+    turso_url: String,
+    turso_token: String,
+) -> AppResult<String> {
+    let token_to_use = {
+        let trimmed = turso_token.trim().to_string();
+        if !trimmed.is_empty() {
+            trimmed
+        } else {
+            let conn = state.conn()?;
+            sync::get_local_setting(&conn, "turso_token")
+        }
+    };
+    sync::test_turso_connection_http(&turso_url, &token_to_use)
+}
+
+#[tauri::command]
+pub fn save_turso_settings(
+    app: AppHandle,
+    state: State<'_, DbState>,
+    turso_url: String,
+    turso_token: String,
+    pin: String,
+) -> AppResult<SyncStatus> {
+    let (clean_url, effective_token) = {
+        let conn = state.conn()?;
+        check_pin(&conn, &pin)?;
+        let normalized_check = sync::normalize_turso_url(&turso_url)?;
+        let _ = normalized_check;
+        let stored_token = sync::get_local_setting(&conn, "turso_token");
+        let tok = if turso_token.trim().is_empty() {
+            stored_token
+        } else {
+            turso_token.trim().to_string()
+        };
+        if tok.trim().is_empty() {
+            return Err(AppError::validation("Turso Auth Token is required."));
+        }
+        (turso_url.trim().to_string(), tok)
+    };
+
+    // Verify network connection outside the SQLite lock first
+    sync::test_turso_connection_http(&clean_url, &effective_token)?;
+
+    {
+        let conn = state.conn()?;
+        let prev_url = sync::get_local_setting(&conn, "turso_url");
+        sync::set_local_setting(&conn, "turso_url", &clean_url)?;
+        sync::set_local_setting(&conn, "turso_token", &effective_token)?;
+        sync::set_local_setting(&conn, "sync_enabled", "1")?;
+        sync::set_local_setting(&conn, "last_sync_error", "")?;
+        if prev_url.trim() != clean_url {
+            sync::set_local_setting(&conn, "last_sync_cursor", "0")?;
+        }
+        sync::queue_all_local_records(&conn)?;
+    }
+
+    let cycle_res = sync::run_sync_cycle(&state);
+    let _ = app.emit("sync-status", ());
+    match cycle_res {
+        Ok((_pushed, pulled)) => {
+            if pulled > 0 {
+                let _ = app.emit("sync-updated", ());
+            }
+        }
+        Err(e) => return Err(e),
+    }
+
+    let conn = state.conn()?;
+    sync::get_sync_status(&conn)
+}
+
+#[tauri::command]
+pub fn sync_now(app: AppHandle, state: State<'_, DbState>) -> AppResult<SyncStatus> {
+    let result = sync::run_sync_cycle(&state);
+    let _ = app.emit("sync-status", ());
+    match result {
+        Ok((_pushed, pulled)) => {
+            if pulled > 0 {
+                let _ = app.emit("sync-updated", ());
+            }
+            let conn = state.conn()?;
+            sync::get_sync_status(&conn)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+#[tauri::command]
+pub fn disconnect_turso(
+    app: AppHandle,
+    state: State<'_, DbState>,
+    pin: String,
+) -> AppResult<SyncStatus> {
+    let status = {
+        let conn = state.conn()?;
+        check_pin(&conn, &pin)?;
+        sync::set_local_setting(&conn, "sync_enabled", "0")?;
+        sync::set_local_setting(&conn, "turso_token", "")?;
+        sync::set_local_setting(&conn, "last_sync_cursor", "0")?;
+        sync::set_local_setting(&conn, "last_sync_error", "")?;
+        sync::get_sync_status(&conn)?
+    };
+    let _ = app.emit("sync-status", ());
+    Ok(status)
 }
 
 #[cfg(test)]
