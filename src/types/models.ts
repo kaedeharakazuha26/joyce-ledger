@@ -107,3 +107,42 @@ export interface SyncStatus {
   lastSyncAt: string | null;
   lastSyncError: string | null;
 }
+
+export type UserRole = "owner" | "manager" | "cashier" | "custom";
+
+export interface UserAccount {
+  id: number;
+  name: string;
+  pin: string;
+  role: string;
+  assignedBranchId: string | null;
+  canViewDashboard: boolean;
+  canAddRecords: boolean;
+  canEditRecords: boolean;
+  canDeleteRecords: boolean;
+  canManageEmployees: boolean;
+  canManageBranches: boolean;
+  canManageSettings: boolean;
+  createdAt: string;
+}
+
+export interface UserInput {
+  name: string;
+  pin: string;
+  role: string;
+  assignedBranchId: string | null;
+  canViewDashboard: boolean;
+  canAddRecords: boolean;
+  canEditRecords: boolean;
+  canDeleteRecords: boolean;
+  canManageEmployees: boolean;
+  canManageBranches: boolean;
+  canManageSettings: boolean;
+}
+
+export interface SafetyBackupItem {
+  filename: string;
+  reason: string;
+  createdAt: string;
+  sizeBytes: number;
+}

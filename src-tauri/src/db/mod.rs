@@ -1,7 +1,7 @@
 pub mod migrations;
 pub mod sync;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
@@ -12,10 +12,15 @@ use crate::error::{AppError, AppResult};
 pub struct DbState {
     pub conn: Mutex<Connection>,
     pub active_branch: Mutex<String>,
+    pub backup_dir: Option<PathBuf>,
 }
 
 impl DbState {
     pub fn new(conn: Connection) -> Self {
+        Self::with_backup_dir(conn, None)
+    }
+
+    pub fn with_backup_dir(conn: Connection, backup_dir: Option<PathBuf>) -> Self {
         let _ = sync::ensure_default_device_name(&conn);
         let active = conn
             .query_row(
@@ -34,6 +39,7 @@ impl DbState {
         Self {
             conn: Mutex::new(conn),
             active_branch: Mutex::new(active),
+            backup_dir,
         }
     }
 

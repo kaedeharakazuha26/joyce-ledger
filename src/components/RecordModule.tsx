@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
+import { useAuth } from "../context/AuthContext";
 import { useBranch } from "../context/BranchContext";
 import { addCategory, employeesApi, errorMessage, exportCsv, onSyncEvent } from "../lib/api";
 import { describeRange, isValidIsoDate, rangeSlug, todayFilter, todayLocal } from "../lib/dates";
@@ -116,6 +117,10 @@ export function RecordModule<T extends AnyRecord>({
   describe,
 }: RecordModuleProps<T>) {
   const toast = useToast();
+  const { currentUser } = useAuth();
+  const canAdd = !!currentUser?.canAddRecords;
+  const canEdit = !!currentUser?.canEditRecords;
+  const canDelete = !!currentUser?.canDeleteRecords;
   const [filter, setFilter] = useState<DateFilter>(todayFilter);
   const { records, totals, loading, error, create, update, remove } = useRecords<T, Record<string, unknown>>(module, filter);
 
@@ -300,12 +305,13 @@ export function RecordModule<T extends AnyRecord>({
       />
 
       {/* Entry form */}
-      <form
-        id={`${module}-form`}
-        noValidate
-        onSubmit={handleSubmit}
-        className={`card card-hover mb-6 p-6 transition-all duration-300 ${editing ? "ring-2 ring-amber-400" : ""}`}
-      >
+      {canAdd || editing ? (
+        <form
+          id={`${module}-form`}
+          noValidate
+          onSubmit={handleSubmit}
+          className={`card card-hover mb-6 p-6 transition-all duration-300 ${editing ? "ring-2 ring-amber-400" : ""}`}
+        >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{editing ? `Edit ${noun.toLowerCase()}` : `New ${noun.toLowerCase()}`}</h2>
           {editing && (
@@ -387,6 +393,11 @@ export function RecordModule<T extends AnyRecord>({
           </button>
         </div>
       </form>
+      ) : (
+        <div className="card mb-6 flex items-center justify-between gap-3 border-amber-500/20 p-4 text-sm text-slate-400">
+          <span>View-only access: your account ({currentUser?.name}) does not have permission to add new {title.toLowerCase()} records.</span>
+        </div>
+      )}
 
       {/* Filter + totals */}
       <section className="card card-hover overflow-hidden">
@@ -412,6 +423,8 @@ export function RecordModule<T extends AnyRecord>({
             columns={columns}
             rows={records}
             editingId={editing?.id ?? null}
+            canEdit={canEdit}
+            canDelete={canDelete}
             onEdit={startEdit}
             onDelete={setPendingDelete}
           />

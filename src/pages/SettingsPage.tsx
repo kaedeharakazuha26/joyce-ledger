@@ -5,26 +5,88 @@ import { PageHeader } from "../components/AppLayout";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { useAuth } from "../context/AuthContext";
 import { useBranch } from "../context/BranchContext";
 import {
   backupDatabase,
   changeAdminPin,
+  createUser,
+  deleteUser,
   disconnectTurso,
   errorMessage,
   getSyncSettings,
+  listSafetyBackups,
+  listUsers,
   onSyncEvent,
   resetDatabase,
   restoreDatabase,
+  restoreSafetyBackup,
   saveDeviceName,
   saveTursoSettings,
   syncNow,
   testTursoConnection,
+  updateUser,
 } from "../lib/api";
 import { todayLocal } from "../lib/dates";
-import type { SyncStatus } from "../types/models";
+import type { SafetyBackupItem, SyncStatus, UserAccount, UserInput } from "../types/models";
+
+const BLANK_USER_INPUT: UserInput = {
+  name: "",
+  pin: "",
+  role: "cashier",
+  assignedBranchId: null,
+  canViewDashboard: false,
+  canAddRecords: true,
+  canEditRecords: false,
+  canDeleteRecords: false,
+  canManageEmployees: false,
+  canManageBranches: false,
+  canManageSettings: false,
+};
+
+function presetForRole(role: string): Partial<UserInput> {
+  if (role === "owner") {
+    return {
+      role: "owner",
+      canViewDashboard: true,
+      canAddRecords: true,
+      canEditRecords: true,
+      canDeleteRecords: true,
+      canManageEmployees: true,
+      canManageBranches: true,
+      canManageSettings: true,
+    };
+  }
+  if (role === "manager") {
+    return {
+      role: "manager",
+      canViewDashboard: true,
+      canAddRecords: true,
+      canEditRecords: true,
+      canDeleteRecords: true,
+      canManageEmployees: true,
+      canManageBranches: true,
+      canManageSettings: false,
+    };
+  }
+  if (role === "cashier") {
+    return {
+      role: "cashier",
+      canViewDashboard: false,
+      canAddRecords: true,
+      canEditRecords: false,
+      canDeleteRecords: false,
+      canManageEmployees: false,
+      canManageBranches: false,
+      canManageSettings: false,
+    };
+  }
+  return { role: "custom" };
+}
 
 export function SettingsPage() {
   const toast = useToast();
+  const { currentUser, lockSession, refreshCurrentUser } = useAuth();
   const { branches, refreshBranches, deleteBranch, updateBranch, currentBranchId } = useBranch();
 
   // Backup & Restore states
@@ -50,9 +112,25 @@ export function SettingsPage() {
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resetBranchId, setResetBranchId] = useState<string>("main");
   const [resetType, setResetType] = useState<"transactions" | "full">("transactions");
+  const [resetConfirmWord, setResetConfirmWord] = useState("");
   const [resetPin, setResetPin] = useState("");
   const [showResetPin, setShowResetPin] = useState(false);
   const [resetting, setResetting] = useState(false);
+
+  // User Accounts & Permissions states
+  const [users, setUsers] = useState<UserAccount[]>([]);
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
+  const [userForm, setUserForm] = useState<UserInput>(BLANK_USER_INPUT);
+  const [userAdminPin, setUserAdminPin] = useState("");
+  const [savingUser, setSavingUser] = useState(false);
+  const [pendingDeleteUser, setPendingDeleteUser] = useState<UserAccount | null>(null);
+  const [deletingUser, setDeletingUser] = useState(false);
+
+  // Automatic Safety Snapshots states
+  const [safetyBackups, setSafetyBackups] = useState<SafetyBackupItem[]>([]);
+  const [pendingSafetyRestore, setPendingSafetyRestore] = useState<SafetyBackupItem | null>(null);
+  const [restoringSafety, setRestoringSafety] = useState(false);
 
   // Delete Branch Modal states
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -87,18 +165,125 @@ export function SettingsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    void loadSyncStatus(true);
-  }, [loadSyncStatus]);
+  const loadUsersAndBackups = useCallback(async () => {
+    try {
+      const [uList, bList] = await Promise.all([listUsers(), listSafetyBackups()]);
+      setUsers(uList);
+      setSafetyBackups(bList);
+    } catch {
+      // Ignore outside runtime
+    }
+  }, []);
 
   useEffect(() => {
-    const un1 = onSyncEvent("sync-status", () => void loadSyncStatus(false));
-    const un2 = onSyncEvent("sync-updated", () => void loadSyncStatus(false));
+    void loadSyncStatus(true);
+    void loadUsersAndBackups();
+  }, [loadSyncStatus, loadUsersAndBackups]);
+
+  useEffect(() => {
+    const un1 = onSyncEvent("sync-status", () => {
+      void loadSyncStatus(false);
+      void loadUsersAndBackups();
+    });
+    const un2 = onSyncEvent("sync-updated", () => {
+      void loadSyncStatus(false);
+      void loadUsersAndBackups();
+    });
     return () => {
       un1();
       un2();
     };
-  }, [loadSyncStatus]);
+  }, [loadSyncStatus, loadUsersAndBackups]);
+
+  const openCreateUser = () => {
+    setEditingUser(null);
+    setUserForm({ ...BLANK_USER_INPUT });
+    setUserAdminPin("");
+    setUserModalOpen(true);
+  };
+
+  const openEditUser = (u: UserAccount) => {
+    setEditingUser(u);
+    setUserForm({
+      name: u.name,
+      pin: u.pin,
+      role: u.role,
+      assignedBranchId: u.assignedBranchId,
+      canViewDashboard: u.canViewDashboard,
+      canAddRecords: u.canAddRecords,
+      canEditRecords: u.canEditRecords,
+      canDeleteRecords: u.canDeleteRecords,
+      canManageEmployees: u.canManageEmployees,
+      canManageBranches: u.canManageBranches,
+      canManageSettings: u.canManageSettings,
+    });
+    setUserAdminPin("");
+    setUserModalOpen(true);
+  };
+
+  const handleSaveUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userForm.name.trim()) {
+      toast.error("User name is required.");
+      return;
+    }
+    if (userForm.pin.trim().length < 4) {
+      toast.error("User PIN must be at least 4 characters.");
+      return;
+    }
+    if (!userAdminPin.trim()) {
+      toast.error("Enter your Owner/Admin PIN to save user changes.");
+      return;
+    }
+    setSavingUser(true);
+    try {
+      if (editingUser) {
+        await updateUser(editingUser.id, userForm, userAdminPin.trim());
+        toast.success(`Updated user "${userForm.name.trim()}".`);
+      } else {
+        await createUser(userForm, userAdminPin.trim());
+        toast.success(`Added user "${userForm.name.trim()}".`);
+      }
+      setUserModalOpen(false);
+      setUserAdminPin("");
+      await loadUsersAndBackups();
+      await refreshCurrentUser();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSavingUser(false);
+    }
+  };
+
+  const handleDeleteUserConfirm = async (pin: string) => {
+    if (!pendingDeleteUser) return;
+    setDeletingUser(true);
+    try {
+      await deleteUser(pendingDeleteUser.id, pin);
+      toast.success(`Removed user "${pendingDeleteUser.name}".`);
+      setPendingDeleteUser(null);
+      await loadUsersAndBackups();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setDeletingUser(false);
+    }
+  };
+
+  const handleRestoreSafetySnapshot = async (pin: string) => {
+    if (!pendingSafetyRestore) return;
+    setRestoringSafety(true);
+    try {
+      await restoreSafetyBackup(pendingSafetyRestore.filename, pin);
+      toast.success("Database restored from automatic safety snapshot! Reloading…");
+      setPendingSafetyRestore(null);
+      setTimeout(() => window.location.reload(), 900);
+    } catch (err) {
+      toast.error(`Safety restore failed: ${errorMessage(err)}`);
+    } finally {
+      setRestoringSafety(false);
+    }
+  };
 
   const handleSaveDeviceName = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -282,11 +467,11 @@ export function SettingsPage() {
     }
   };
 
-  const handleConfirmRestore = async () => {
+  const handleConfirmRestore = async (pin: string) => {
     if (!selectedRestorePath) return;
     setRestoring(true);
     try {
-      await restoreDatabase(selectedRestorePath);
+      await restoreDatabase(selectedRestorePath, pin);
       toast.success("Database restored successfully! Reloading application…");
       setConfirmRestoreOpen(false);
       setSelectedRestorePath(null);
@@ -333,18 +518,24 @@ export function SettingsPage() {
   // --- Handlers: Reset Database ---
   const handleConfirmReset = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (resetConfirmWord.trim().toUpperCase() !== "RESET") {
+      toast.error('Please type RESET in the confirmation box first.');
+      return;
+    }
     if (!resetPin.trim()) {
-      toast.error("Please enter the admin PIN.");
+      toast.error("Please enter the Owner / Admin PIN.");
       return;
     }
 
     setResetting(true);
     try {
       await resetDatabase(resetBranchId, resetPin.trim(), resetType);
-      toast.success("Selected database records have been reset.");
+      toast.success("Selected records reset. An automatic safety snapshot was saved first.");
       setResetModalOpen(false);
       setResetPin("");
+      setResetConfirmWord("");
       await refreshBranches();
+      await loadUsersAndBackups();
       setTimeout(() => {
         window.location.reload();
       }, 800);
@@ -383,14 +574,152 @@ export function SettingsPage() {
     }
   };
 
+  if (!currentUser?.canManageSettings) {
+    return (
+      <>
+        <PageHeader
+          title="Settings & Maintenance"
+          description="Protected Owner & Administrator area."
+        />
+        <section className="card border-amber-500/25 p-8 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
+            <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">
+            Settings Locked for {currentUser?.name}
+          </h2>
+          <p className="mx-auto mt-1.5 max-w-md text-sm text-slate-500 dark:text-slate-400">
+            Only accounts with <strong>Admin &amp; Settings</strong> permission can manage Turso cloud sync, user PINs, branches, or database resets.
+          </p>
+          <button
+            type="button"
+            onClick={lockSession}
+            className="btn-primary mt-5"
+          >
+            Switch to Owner / Admin PIN
+          </button>
+        </section>
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader
         title="Settings & Maintenance"
-        description="Manage local database backups, branch configurations, and administrator security credentials."
+        description="Manage Turso cloud sync, user PINs & permissions, backups, and branches."
       />
 
       <div className="space-y-6">
+        {/* User Accounts, PINs & Permissions Card */}
+        <section className="card overflow-hidden border-amber-500/25 p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                  User Accounts, PINs &amp; Permissions
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Create separate PINs for owners, managers, and cashiers—synced automatically across all laptops via Turso.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              id="settings-add-user-btn"
+              onClick={openCreateUser}
+              className="btn-primary h-10 px-4 text-xs font-bold"
+            >
+              + Add User Account
+            </button>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2">
+            {users.map((u) => {
+              const branchLabel = u.assignedBranchId
+                ? branches.find((b) => b.id === u.assignedBranchId)?.name || u.assignedBranchId
+                : "All Branches";
+              const perms = [
+                u.canViewDashboard && "Dashboard",
+                u.canAddRecords && "Add",
+                u.canEditRecords && "Edit",
+                u.canDeleteRecords && "Delete",
+                u.canManageEmployees && "Employees",
+                u.canManageBranches && "Branches",
+                u.canManageSettings && "Admin/Reset",
+              ].filter(Boolean) as string[];
+
+              return (
+                <div
+                  key={u.id}
+                  className="flex flex-col justify-between rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-950/40"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-slate-900 dark:text-slate-100">{u.name}</h3>
+                          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-300">
+                            {u.role}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-400">
+                          Branch: <strong className="text-slate-300">{branchLabel}</strong> · PIN:{" "}
+                          <span className="font-mono text-slate-300">••••</span>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openEditUser(u)}
+                          className="btn-secondary btn-sm"
+                        >
+                          Edit
+                        </button>
+                        {u.role !== "owner" && (
+                          <button
+                            type="button"
+                            onClick={() => setPendingDeleteUser(u)}
+                            className="btn btn-sm border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:bg-slate-900 dark:hover:bg-rose-950"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {perms.length === 0 ? (
+                        <span className="text-[11px] text-slate-500">View-only</span>
+                      ) : (
+                        perms.map((p) => (
+                          <span
+                            key={p}
+                            className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                              p === "Delete" || p === "Admin/Reset"
+                                ? "bg-amber-500/15 text-amber-300 border border-amber-500/25"
+                                : "bg-slate-200/70 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                            }`}
+                          >
+                            {p}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
         {/* Cloud Sync (Turso) & Multi-Laptop Setup Card */}
         <section className="card overflow-hidden border-amber-500/25 p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
@@ -854,6 +1183,52 @@ export function SettingsPage() {
               </button>
             </div>
           </div>
+
+          {/* Automatic Pre-Reset Safety Snapshots */}
+          <div className="mt-6 rounded-2xl border border-emerald-500/20 bg-emerald-950/10 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-emerald-300">
+                  Automatic Safety Snapshots (1-Click Undo)
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  Before any Database Reset, Branch Delete, or Restore runs, a recovery copy is saved automatically here.
+                </p>
+              </div>
+              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300">
+                {safetyBackups.length} {safetyBackups.length === 1 ? "snapshot" : "snapshots"}
+              </span>
+            </div>
+
+            {safetyBackups.length === 0 ? (
+              <p className="mt-3 text-xs text-slate-500">
+                No automatic snapshots created yet (one is automatically captured right before any reset or restore).
+              </p>
+            ) : (
+              <div className="mt-4 space-y-2 max-h-56 overflow-y-auto pr-1">
+                {safetyBackups.map((b) => (
+                  <div
+                    key={b.filename}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800/80 bg-slate-950/50 px-3.5 py-2.5 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-200 truncate">{b.reason}</p>
+                      <p className="font-mono text-[11px] text-slate-400 truncate">
+                        {b.filename} · {(b.sizeBytes / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPendingSafetyRestore(b)}
+                      className="btn-secondary btn-sm shrink-0"
+                    >
+                      Restore Snapshot
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
 
         {/* Danger Zone: Reset & Delete Branch */}
@@ -896,6 +1271,7 @@ export function SettingsPage() {
                 id="settings-reset-modal-btn"
                 onClick={() => {
                   setResetPin("");
+                  setResetConfirmWord("");
                   setResetModalOpen(true);
                 }}
                 className="btn mt-4 w-full border border-rose-300 bg-white text-rose-700 hover:bg-rose-50 text-sm font-semibold dark:border-rose-800 dark:bg-slate-900 dark:text-rose-300 dark:hover:bg-rose-950/60"
@@ -966,7 +1342,7 @@ export function SettingsPage() {
               </div>
             </div>
             <span className="badge-gold">
-              v2.0.0 Stable
+              v2.1.0 Stable
             </span>
           </div>
 
@@ -1090,7 +1466,7 @@ export function SettingsPage() {
               type="button"
               className="btn-danger"
               onClick={(e) => void handleConfirmReset(e)}
-              disabled={resetting || !resetPin.trim()}
+              disabled={resetting || !resetPin.trim() || resetConfirmWord.trim().toUpperCase() !== "RESET"}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1186,32 +1562,47 @@ export function SettingsPage() {
             </div>
           </div>
 
-          {/* Admin PIN Box */}
-          <div className="rounded-xl border border-slate-200/90 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/50">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Admin Security PIN Required
+          {/* Type RESET Gate + Admin PIN Box */}
+          <div className="space-y-4 rounded-xl border border-slate-200/90 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                Type RESET to Confirm
               </label>
-              <button
-                type="button"
-                onClick={() => setShowResetPin(!showResetPin)}
-                className="text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400"
-              >
-                {showResetPin ? "Hide PIN" : "Show PIN"}
-              </button>
+              <input
+                type="text"
+                placeholder="Type RESET here"
+                value={resetConfirmWord}
+                onChange={(e) => setResetConfirmWord(e.target.value)}
+                className="input mt-1.5 font-mono uppercase tracking-widest text-sm"
+              />
+              <p className="mt-1 text-[11px] text-slate-400">
+                An automatic safety snapshot will be saved before wiping so you can undo if needed.
+              </p>
             </div>
-            <p className="mt-1 text-xs text-slate-500">
-              Enter admin PIN (Default: <span className="font-mono font-semibold">0000</span>) to authorize reset.
-            </p>
-            <input
-              type={showResetPin ? "text" : "password"}
-              required
-              autoFocus
-              placeholder="Enter PIN (e.g. 0000)"
-              value={resetPin}
-              onChange={(e) => setResetPin(e.target.value)}
-              className="input mt-2.5 font-mono tracking-widest text-base"
-            />
+
+            <div>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Owner / Admin PIN Required
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowResetPin(!showResetPin)}
+                  className="text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400"
+                >
+                  {showResetPin ? "Hide PIN" : "Show PIN"}
+                </button>
+              </div>
+              <input
+                type={showResetPin ? "text" : "password"}
+                required
+                autoFocus
+                placeholder="Enter Owner PIN"
+                value={resetPin}
+                onChange={(e) => setResetPin(e.target.value)}
+                className="input mt-2 font-mono tracking-widest text-base"
+              />
+            </div>
           </div>
         </form>
       </Modal>
@@ -1357,7 +1748,7 @@ export function SettingsPage() {
               {selectedRestorePath}
             </p>
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-              Make sure you have a current backup if you need to keep your recent entries.
+              An automatic safety snapshot will be created before restoring.
             </p>
           </>
         }
@@ -1368,6 +1759,185 @@ export function SettingsPage() {
           setConfirmRestoreOpen(false);
           setSelectedRestorePath(null);
         }}
+      />
+
+      {/* Add / Edit User Modal */}
+      <Modal
+        open={userModalOpen}
+        title={editingUser ? `Edit User: ${editingUser.name}` : "Add New User Account"}
+        onClose={() => setUserModalOpen(false)}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setUserModalOpen(false)}
+              disabled={savingUser}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              id="settings-user-save-btn"
+              className="btn-primary"
+              onClick={(e) => void handleSaveUser(e)}
+              disabled={savingUser || !userForm.name.trim() || userForm.pin.trim().length < 4 || !userAdminPin.trim()}
+            >
+              {savingUser ? "Saving…" : editingUser ? "Save User Changes" : "Create User"}
+            </button>
+          </>
+        }
+      >
+        <form onSubmit={(e) => void handleSaveUser(e)} className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="label text-xs">Staff / User Name</label>
+              <input
+                id="settings-user-name"
+                type="text"
+                required
+                placeholder="e.g. Ana (Cashier)"
+                value={userForm.name}
+                onChange={(e) => setUserForm((p) => ({ ...p, name: e.target.value }))}
+                className="input h-10 text-sm"
+              />
+            </div>
+            <div>
+              <label className="label text-xs">Unique PIN (4+ chars)</label>
+              <input
+                id="settings-user-pin"
+                type="text"
+                required
+                placeholder="e.g. 1234"
+                value={userForm.pin}
+                onChange={(e) => setUserForm((p) => ({ ...p, pin: e.target.value }))}
+                className="input h-10 font-mono text-sm tracking-widest"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="label text-xs">Role Preset</label>
+              <select
+                value={userForm.role}
+                onChange={(e) => {
+                  const preset = presetForRole(e.target.value);
+                  setUserForm((p) => ({ ...p, ...preset }));
+                }}
+                className="select input h-10 text-sm"
+              >
+                <option value="cashier">Cashier (Add Only · No Delete)</option>
+                <option value="manager">Manager (Can Edit &amp; Delete · No DB Reset)</option>
+                <option value="owner">Owner (Full Access)</option>
+                <option value="custom">Custom Permissions</option>
+              </select>
+            </div>
+            <div>
+              <label className="label text-xs">Branch Restriction</label>
+              <select
+                value={userForm.assignedBranchId ?? ""}
+                onChange={(e) =>
+                  setUserForm((p) => ({
+                    ...p,
+                    assignedBranchId: e.target.value ? e.target.value : null,
+                  }))
+                }
+                className="select input h-10 text-sm"
+              >
+                <option value="">All Branches Allowed</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    Locked to: {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* 7 Permission Checkboxes */}
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5">
+            <p className="mb-2.5 text-[11px] font-bold uppercase tracking-wider text-amber-300">
+              Permissions
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 text-xs">
+              {(
+                [
+                  ["canViewDashboard", "View Dashboard & Print Reports"],
+                  ["canAddRecords", "Add Sales / Expenses / Payouts"],
+                  ["canEditRecords", "Edit Existing Records"],
+                  ["canDeleteRecords", "Delete Records"],
+                  ["canManageEmployees", "Add / Edit / Delete Employees"],
+                  ["canManageBranches", "Switch & Rename Branches"],
+                  ["canManageSettings", "Owner Admin (Users, Turso, Reset)"],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="flex cursor-pointer items-center gap-2 text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(userForm[key])}
+                    onChange={(e) =>
+                      setUserForm((p) => ({
+                        ...p,
+                        role: "custom",
+                        [key]: e.target.checked,
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="label text-xs">Your Owner / Admin PIN (to authorize)</label>
+            <input
+              id="settings-user-admin-pin"
+              type="password"
+              required
+              placeholder="Enter Owner PIN"
+              value={userAdminPin}
+              onChange={(e) => setUserAdminPin(e.target.value)}
+              className="input h-10 font-mono text-sm tracking-widest"
+            />
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!pendingDeleteUser}
+        title="Remove User Account?"
+        requirePin={true}
+        message={
+          pendingDeleteUser && (
+            <>
+              Remove user <strong className="text-white">{pendingDeleteUser.name}</strong>? They will no longer be able to unlock the ledger with their PIN.
+            </>
+          )
+        }
+        confirmLabel="Remove User"
+        busy={deletingUser}
+        onConfirm={handleDeleteUserConfirm}
+        onCancel={() => setPendingDeleteUser(null)}
+      />
+
+      <ConfirmDialog
+        open={!!pendingSafetyRestore}
+        title="Restore Automatic Safety Snapshot?"
+        requirePin={true}
+        message={
+          pendingSafetyRestore && (
+            <>
+              Restore database from <span className="font-mono text-amber-300">{pendingSafetyRestore.filename}</span> ({pendingSafetyRestore.reason})? Your current database state will be snapshotted first.
+            </>
+          )
+        }
+        confirmLabel="Restore Snapshot"
+        busy={restoringSafety}
+        onConfirm={handleRestoreSafetySnapshot}
+        onCancel={() => setPendingSafetyRestore(null)}
       />
     </>
   );

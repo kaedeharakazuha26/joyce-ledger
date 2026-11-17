@@ -202,6 +202,11 @@ pub fn queue_all_local_records(conn: &Connection) -> AppResult<usize> {
         INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
         SELECT 'app_settings', 'admin_pin', 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now')
         FROM app_settings WHERE key = 'admin_pin' AND value != '0000';
+        INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+        SELECT 'app_users', sync_id, 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        FROM app_users
+        WHERE sync_id IS NOT NULL
+          AND NOT (sync_id = 'user:owner' AND pin = '0000' AND updated_at = created_at);
     ";
     conn.execute_batch(sql)?;
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r.get(0))?;
@@ -487,6 +492,50 @@ pub fn collect_outbox_batch(conn: &Connection, limit: usize) -> AppResult<Vec<Sy
                     },
                 )
                 .optional()?,
+            "app_users" => conn
+                .query_row(
+                    "SELECT name, pin, role, assigned_branch_id,
+                            can_view_dashboard, can_add_records, can_edit_records, can_delete_records,
+                            can_manage_employees, can_manage_branches, can_manage_settings,
+                            created_at, updated_at, device_name
+                     FROM app_users WHERE sync_id = ?1",
+                    [&sync_id],
+                    |r| {
+                        let name: String = r.get(0)?;
+                        let pin: String = r.get(1)?;
+                        let role: String = r.get(2)?;
+                        let assigned_branch_id: Option<String> = r.get(3)?;
+                        let can_view_dashboard: i64 = r.get(4)?;
+                        let can_add_records: i64 = r.get(5)?;
+                        let can_edit_records: i64 = r.get(6)?;
+                        let can_delete_records: i64 = r.get(7)?;
+                        let can_manage_employees: i64 = r.get(8)?;
+                        let can_manage_branches: i64 = r.get(9)?;
+                        let can_manage_settings: i64 = r.get(10)?;
+                        let created_at: String = r.get(11)?;
+                        let updated_at: String = r.get(12)?;
+                        let dev: String = r.get(13)?;
+                        Ok((
+                            json!({
+                                "name": name,
+                                "pin": pin,
+                                "role": role,
+                                "assigned_branch_id": assigned_branch_id,
+                                "can_view_dashboard": can_view_dashboard,
+                                "can_add_records": can_add_records,
+                                "can_edit_records": can_edit_records,
+                                "can_delete_records": can_delete_records,
+                                "can_manage_employees": can_manage_employees,
+                                "can_manage_branches": can_manage_branches,
+                                "can_manage_settings": can_manage_settings,
+                                "created_at": created_at
+                            }),
+                            updated_at,
+                            dev,
+                        ))
+                    },
+                )
+                .optional()?,
             _ => None,
         };
 
@@ -597,6 +646,9 @@ pub fn apply_remote_changes(
                 }
                 "salaries" => {
                     tx.execute("DELETE FROM salaries WHERE sync_id = ?1", [&c.sync_id])?;
+                }
+                "app_users" if c.sync_id != "user:owner" => {
+                    tx.execute("DELETE FROM app_users WHERE sync_id = ?1", [&c.sync_id])?;
                 }
                 _ => {}
             }
@@ -834,6 +886,74 @@ pub fn apply_remote_changes(
                          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
                         params![val, c.updated_at],
                     )?;
+                    applied += 1;
+                }
+            }
+            "app_users" => {
+                let name = str_field(p, "name");
+                let pin = str_field(p, "pin");
+                let role = str_field(p, "role");
+                let assigned_branch_id = opt_str_field(p, "assigned_branch_id");
+                let can_view_dashboard = i64_field(p, "can_view_dashboard");
+                let can_add_records = i64_field(p, "can_add_records");
+                let can_edit_records = i64_field(p, "can_edit_records");
+                let can_delete_records = i64_field(p, "can_delete_records");
+                let can_manage_employees = i64_field(p, "can_manage_employees");
+                let can_manage_branches = i64_field(p, "can_manage_branches");
+                let can_manage_settings = i64_field(p, "can_manage_settings");
+                let created_at = str_field(p, "created_at");
+                if !name.is_empty() && !pin.is_empty() {
+                    // Resolve any conflicting PIN on another sync_id cleanly
+                    tx.execute(
+                        "DELETE FROM app_users WHERE pin = ?1 AND sync_id != ?2 AND sync_id != 'user:owner'",
+                        params![pin, c.sync_id],
+                    )?;
+                    tx.execute(
+                        "INSERT INTO app_users (
+                           name, pin, role, assigned_branch_id,
+                           can_view_dashboard, can_add_records, can_edit_records, can_delete_records,
+                           can_manage_employees, can_manage_branches, can_manage_settings,
+                           created_at, updated_at, sync_id, device_name
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                         ON CONFLICT(sync_id) DO UPDATE SET
+                           name = excluded.name,
+                           pin = excluded.pin,
+                           role = excluded.role,
+                           assigned_branch_id = excluded.assigned_branch_id,
+                           can_view_dashboard = excluded.can_view_dashboard,
+                           can_add_records = excluded.can_add_records,
+                           can_edit_records = excluded.can_edit_records,
+                           can_delete_records = excluded.can_delete_records,
+                           can_manage_employees = excluded.can_manage_employees,
+                           can_manage_branches = excluded.can_manage_branches,
+                           can_manage_settings = excluded.can_manage_settings,
+                           updated_at = excluded.updated_at,
+                           device_name = excluded.device_name",
+                        params![
+                            name,
+                            pin,
+                            role,
+                            assigned_branch_id,
+                            can_view_dashboard,
+                            can_add_records,
+                            can_edit_records,
+                            can_delete_records,
+                            can_manage_employees,
+                            can_manage_branches,
+                            can_manage_settings,
+                            created_at,
+                            c.updated_at,
+                            c.sync_id,
+                            c.device_name
+                        ],
+                    )?;
+                    if c.sync_id == "user:owner" {
+                        tx.execute(
+                            "INSERT INTO app_settings (key, value, updated_at) VALUES ('admin_pin', ?1, ?2)
+                             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                            params![pin, c.updated_at],
+                        )?;
+                    }
                     applied += 1;
                 }
             }
@@ -1088,6 +1208,26 @@ fn ensure_remote_schema(pipeline_url: &str, token: &str) -> AppResult<()> {
             )",
             vec![],
         ),
+        hrana_stmt(
+            "CREATE TABLE IF NOT EXISTS app_users (
+                sync_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                pin TEXT NOT NULL,
+                role TEXT NOT NULL,
+                assigned_branch_id TEXT,
+                can_view_dashboard INTEGER NOT NULL DEFAULT 0,
+                can_add_records INTEGER NOT NULL DEFAULT 1,
+                can_edit_records INTEGER NOT NULL DEFAULT 0,
+                can_delete_records INTEGER NOT NULL DEFAULT 0,
+                can_manage_employees INTEGER NOT NULL DEFAULT 0,
+                can_manage_branches INTEGER NOT NULL DEFAULT 0,
+                can_manage_settings INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                device_name TEXT NOT NULL DEFAULT ''
+            )",
+            vec![],
+        ),
     ];
 
     send_turso_pipeline(pipeline_url, token, ddl)?;
@@ -1121,6 +1261,7 @@ fn push_statements_for_change(c: &SyncChange) -> Vec<Value> {
             "ld_commissions" => Some("DELETE FROM ld_commissions WHERE sync_id = ?1"),
             "commissions" => Some("DELETE FROM commissions WHERE sync_id = ?1"),
             "salaries" => Some("DELETE FROM salaries WHERE sync_id = ?1"),
+            "app_users" => Some("DELETE FROM app_users WHERE sync_id = ?1"),
             _ => None,
         };
         if let Some(sql) = delete_sql {
@@ -1295,6 +1436,45 @@ fn push_statements_for_change(c: &SyncChange) -> Vec<Value> {
                 vec![
                     HranaArg::Text(str_field(p, "value")),
                     HranaArg::Text(c.updated_at.clone()),
+                ],
+            )),
+            "app_users" => stmts.push(hrana_stmt(
+                "INSERT INTO app_users (
+                   sync_id, name, pin, role, assigned_branch_id,
+                   can_view_dashboard, can_add_records, can_edit_records, can_delete_records,
+                   can_manage_employees, can_manage_branches, can_manage_settings,
+                   created_at, updated_at, device_name
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                 ON CONFLICT(sync_id) DO UPDATE SET
+                   name = excluded.name,
+                   pin = excluded.pin,
+                   role = excluded.role,
+                   assigned_branch_id = excluded.assigned_branch_id,
+                   can_view_dashboard = excluded.can_view_dashboard,
+                   can_add_records = excluded.can_add_records,
+                   can_edit_records = excluded.can_edit_records,
+                   can_delete_records = excluded.can_delete_records,
+                   can_manage_employees = excluded.can_manage_employees,
+                   can_manage_branches = excluded.can_manage_branches,
+                   can_manage_settings = excluded.can_manage_settings,
+                   updated_at = excluded.updated_at,
+                   device_name = excluded.device_name",
+                vec![
+                    HranaArg::Text(c.sync_id.clone()),
+                    HranaArg::Text(str_field(p, "name")),
+                    HranaArg::Text(str_field(p, "pin")),
+                    HranaArg::Text(str_field(p, "role")),
+                    HranaArg::OptText(opt_str_field(p, "assigned_branch_id")),
+                    HranaArg::Int(i64_field(p, "can_view_dashboard")),
+                    HranaArg::Int(i64_field(p, "can_add_records")),
+                    HranaArg::Int(i64_field(p, "can_edit_records")),
+                    HranaArg::Int(i64_field(p, "can_delete_records")),
+                    HranaArg::Int(i64_field(p, "can_manage_employees")),
+                    HranaArg::Int(i64_field(p, "can_manage_branches")),
+                    HranaArg::Int(i64_field(p, "can_manage_settings")),
+                    HranaArg::Text(str_field(p, "created_at")),
+                    HranaArg::Text(c.updated_at.clone()),
+                    HranaArg::Text(c.device_name.clone()),
                 ],
             )),
             _ => {}

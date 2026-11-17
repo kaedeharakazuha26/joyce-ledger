@@ -160,6 +160,49 @@ pub struct Branch {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserAccount {
+    pub id: i64,
+    pub name: String,
+    pub pin: String,
+    pub role: String,
+    pub assigned_branch_id: Option<String>,
+    pub can_view_dashboard: bool,
+    pub can_add_records: bool,
+    pub can_edit_records: bool,
+    pub can_delete_records: bool,
+    pub can_manage_employees: bool,
+    pub can_manage_branches: bool,
+    pub can_manage_settings: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInput {
+    pub name: String,
+    pub pin: String,
+    pub role: String,
+    pub assigned_branch_id: Option<String>,
+    pub can_view_dashboard: bool,
+    pub can_add_records: bool,
+    pub can_edit_records: bool,
+    pub can_delete_records: bool,
+    pub can_manage_employees: bool,
+    pub can_manage_branches: bool,
+    pub can_manage_settings: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SafetyBackupItem {
+    pub filename: String,
+    pub reason: String,
+    pub created_at: String,
+    pub size_bytes: u64,
+}
+
 // ---------- Validation ----------
 
 /// Trim and require non-empty text of reasonable length.

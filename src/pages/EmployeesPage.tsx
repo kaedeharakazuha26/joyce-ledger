@@ -6,6 +6,7 @@ import { EmptyState } from "../components/EmptyState";
 import { MoneyInput } from "../components/MoneyInput";
 import { TextInput } from "../components/TextInput";
 import { useToast } from "../components/Toast";
+import { useAuth } from "../context/AuthContext";
 import { useBranch } from "../context/BranchContext";
 import { employeesApi, errorMessage, onSyncEvent } from "../lib/api";
 import { centavosToInput, formatMoney, parsePesos } from "../lib/money";
@@ -37,6 +38,9 @@ const columns: Column<Employee>[] = [
 
 export function EmployeesPage() {
   const toast = useToast();
+  const { currentUser } = useAuth();
+  const canManageEmployees = !!currentUser?.canManageEmployees;
+  const canDelete = !!currentUser?.canDeleteRecords || !!currentUser?.canManageSettings;
   const { currentBranchId } = useBranch();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -190,6 +194,7 @@ export function EmployeesPage() {
         description="The staff master list with configured rates. Salaries and commissions auto-populate when recording transactions."
       />
 
+      {canManageEmployees ? (
       <form id="employees-form" noValidate onSubmit={handleSubmit} className={`card card-hover mb-6 p-6 transition-all duration-300 ${editing ? "ring-2 ring-amber-400" : ""}`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{editing ? "Edit employee" : "New employee"}</h2>
@@ -265,6 +270,11 @@ export function EmployeesPage() {
           </button>
         </div>
       </form>
+      ) : (
+        <div className="card mb-6 border-amber-500/20 p-4 text-sm text-slate-400">
+          View-only access: ask a Manager or Owner to add or edit staff members.
+        </div>
+      )}
 
       <section className="card card-hover overflow-hidden">
         <div className="flex items-center justify-between gap-4 border-b border-slate-200 p-5 dark:border-slate-800">
@@ -295,6 +305,8 @@ export function EmployeesPage() {
             columns={columns}
             rows={visible}
             editingId={editing?.id ?? null}
+            canEdit={canManageEmployees}
+            canDelete={canDelete}
             onEdit={startEdit}
             onDelete={setPendingDelete}
           />

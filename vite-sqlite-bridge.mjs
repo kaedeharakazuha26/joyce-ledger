@@ -69,11 +69,88 @@ function normalizeTursoUrl(raw) {
 }
 
 function checkPin(db, pin) {
-  const row = db.prepare("SELECT value FROM app_settings WHERE key = 'admin_pin'").get();
-  const stored = (row ? String(row.value) : "0000").trim();
-  if (String(pin || "").trim() !== stored) {
-    throw new Error("Incorrect admin PIN code.");
+  const clean = String(pin || "").trim();
+  if (!clean) throw new Error("PIN code is required.");
+  const u = db
+    .prepare("SELECT name, can_delete_records, can_manage_settings FROM app_users WHERE pin = ?")
+    .get(clean);
+  if (u) {
+    if (Number(u.can_delete_records) !== 0 || Number(u.can_manage_settings) !== 0) return;
+    throw new Error(`User "${u.name}" does not have Delete permission. Ask a Manager or Owner to enter their PIN.`);
   }
+  const cnt = Number(db.prepare("SELECT COUNT(*) as c FROM app_users").get().c || 0);
+  if (cnt === 0) {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'admin_pin'").get();
+    if (clean === String(row ? row.value : "0000").trim()) return;
+  }
+  throw new Error("Incorrect PIN code.");
+}
+
+function checkAdminSettingsPin(db, pin) {
+  const clean = String(pin || "").trim();
+  if (!clean) throw new Error("Owner / Admin PIN code is required.");
+  const u = db.prepare("SELECT name, can_manage_settings FROM app_users WHERE pin = ?").get(clean);
+  if (u) {
+    if (Number(u.can_manage_settings) !== 0) return;
+    throw new Error(`User "${u.name}" does not have Owner / Admin Settings permission.`);
+  }
+  throw new Error("Incorrect Owner / Admin PIN code.");
+}
+
+function setAdminPinSetting(db, pin) {
+  const res = db
+    .prepare("UPDATE app_settings SET value = ?, updated_at = datetime('now','localtime') WHERE key = 'admin_pin'")
+    .run(pin);
+  if (res.changes === 0) {
+    db.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('admin_pin', ?, datetime('now','localtime'))").run(pin);
+  }
+}
+
+function mapUserRow(r) {
+  return {
+    id: Number(r.id),
+    name: String(r.name),
+    pin: String(r.pin),
+    role: String(r.role),
+    assignedBranchId: r.assigned_branch_id ? String(r.assigned_branch_id) : null,
+    canViewDashboard: Number(r.can_view_dashboard) !== 0,
+    canAddRecords: Number(r.can_add_records) !== 0,
+    canEditRecords: Number(r.can_edit_records) !== 0,
+    canDeleteRecords: Number(r.can_delete_records) !== 0,
+    canManageEmployees: Number(r.can_manage_employees) !== 0,
+    canManageBranches: Number(r.can_manage_branches) !== 0,
+    canManageSettings: Number(r.can_manage_settings) !== 0,
+    createdAt: String(r.created_at),
+  };
+}
+
+function getBackupDir(customDbPath) {
+  const base = customDbPath ? path.dirname(path.resolve(customDbPath)) : process.cwd();
+  return path.join(base, "safety_backups");
+}
+
+function createAutoSafetyBackup(db, backupDir, reason) {
+  fs.mkdirSync(backupDir, { recursive: true });
+  const ts = db.prepare("SELECT strftime('%Y%m%d-%H%M%S', 'now', 'localtime') as t").get().t;
+  const cleanReason = String(reason || "snapshot").replace(/[^a-zA-Z0-9_]/g, "_");
+  let filename = `auto_${cleanReason}_${ts}.db`;
+  let dest = path.join(backupDir, filename);
+  if (fs.existsSync(dest)) {
+    filename = `auto_${cleanReason}_${ts}_${Date.now()}.db`;
+    dest = path.join(backupDir, filename);
+  }
+  db.prepare("VACUUM INTO ?").run(dest);
+  const files = fs
+    .readdirSync(backupDir)
+    .filter((f) => f.toLowerCase().endsWith(".db"))
+    .map((f) => ({ f, m: fs.statSync(path.join(backupDir, f)).mtimeMs }))
+    .sort((a, b) => b.m - a.m);
+  for (const old of files.slice(12)) {
+    try {
+      fs.unlinkSync(path.join(backupDir, old.f));
+    } catch {}
+  }
+  return filename;
 }
 
 function requireText(field, v) {
@@ -197,6 +274,11 @@ function queueAllLocalRecords(db) {
     INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
       SELECT 'app_settings', 'admin_pin', 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now')
       FROM app_settings WHERE key = 'admin_pin' AND value != '0000';
+    INSERT OR IGNORE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      SELECT 'app_users', sync_id, 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM app_users
+      WHERE sync_id IS NOT NULL
+        AND NOT (sync_id = 'user:owner' AND pin = '0000' AND updated_at = created_at);
   `);
 }
 
@@ -215,6 +297,7 @@ async function ensureRemoteSchemaOnce(pipelineUrl, token) {
     hranaStmt(`CREATE TABLE IF NOT EXISTS commissions (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, amount INTEGER NOT NULL, commission_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
     hranaStmt(`CREATE TABLE IF NOT EXISTS salaries (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, amount INTEGER NOT NULL, salary_date TEXT NOT NULL, branch_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
     hranaStmt(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`),
+    hranaStmt(`CREATE TABLE IF NOT EXISTS app_users (sync_id TEXT PRIMARY KEY, name TEXT NOT NULL, pin TEXT NOT NULL, role TEXT NOT NULL, assigned_branch_id TEXT, can_view_dashboard INTEGER NOT NULL DEFAULT 0, can_add_records INTEGER NOT NULL DEFAULT 1, can_edit_records INTEGER NOT NULL DEFAULT 0, can_delete_records INTEGER NOT NULL DEFAULT 0, can_manage_employees INTEGER NOT NULL DEFAULT 0, can_manage_branches INTEGER NOT NULL DEFAULT 0, can_manage_settings INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, device_name TEXT NOT NULL DEFAULT '')`),
   ]);
   INITIALIZED_TURSO_URLS.add(pipelineUrl);
 }
@@ -301,7 +384,7 @@ async function runTursoSyncCycle(db) {
             if (hasPending > 0) continue;
 
             if (op === "DELETE") {
-              if (table !== "branches" || syncId !== "branch:main") {
+              if ((table !== "branches" || syncId !== "branch:main") && (table !== "app_users" || syncId !== "user:owner")) {
                 db.prepare(`DELETE FROM ${table} WHERE sync_id = ?`).run(syncId);
               }
               pulled++;
@@ -353,6 +436,31 @@ async function runTursoSyncCycle(db) {
               db.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('admin_pin', ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
                 .run(payload.value, updatedAt);
               pulled++;
+            } else if (table === "app_users") {
+              db.prepare("DELETE FROM app_users WHERE pin = ? AND sync_id != ? AND sync_id != 'user:owner'").run(payload.pin, syncId);
+              db.prepare("INSERT INTO app_users (name, pin, role, assigned_branch_id, can_view_dashboard, can_add_records, can_edit_records, can_delete_records, can_manage_employees, can_manage_branches, can_manage_settings, created_at, updated_at, sync_id, device_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET name=excluded.name, pin=excluded.pin, role=excluded.role, assigned_branch_id=excluded.assigned_branch_id, can_view_dashboard=excluded.can_view_dashboard, can_add_records=excluded.can_add_records, can_edit_records=excluded.can_edit_records, can_delete_records=excluded.can_delete_records, can_manage_employees=excluded.can_manage_employees, can_manage_branches=excluded.can_manage_branches, can_manage_settings=excluded.can_manage_settings, updated_at=excluded.updated_at, device_name=excluded.device_name")
+                .run(
+                  payload.name,
+                  payload.pin,
+                  payload.role || "cashier",
+                  payload.assigned_branch_id ?? null,
+                  Number(payload.can_view_dashboard || 0),
+                  Number(payload.can_add_records || 0),
+                  Number(payload.can_edit_records || 0),
+                  Number(payload.can_delete_records || 0),
+                  Number(payload.can_manage_employees || 0),
+                  Number(payload.can_manage_branches || 0),
+                  Number(payload.can_manage_settings || 0),
+                  payload.created_at,
+                  updatedAt,
+                  syncId,
+                  deviceName,
+                );
+              if (syncId === "user:owner") {
+                db.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('admin_pin', ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+                  .run(payload.pin, updatedAt);
+              }
+              pulled++;
             }
           }
           setLocalSetting(db, "last_sync_cursor", String(maxSeq));
@@ -381,6 +489,7 @@ async function runTursoSyncCycle(db) {
 
 export function createSqliteMiddleware(customDbPath) {
   const db = openDatabase(customDbPath);
+  const backupDir = getBackupDir(customDbPath);
 
   async function dispatch(cmd, args = {}) {
     const emit = [];
@@ -678,8 +787,9 @@ export function createSqliteMiddleware(customDbPath) {
         };
       }
       case "delete_branch": {
-        checkPin(db, args.pin);
+        checkAdminSettingsPin(db, args.pin);
         if (args.branchId === "main") throw new Error("The primary Main Branch cannot be deleted.");
+        createAutoSafetyBackup(db, backupDir, "before_delete_branch");
         for (const t of ["sales", "expenses", "ld_commissions", "commissions", "salaries", "employees", "categories"]) {
           db.prepare(`DELETE FROM ${t} WHERE branch_id = ?`).run(args.branchId);
         }
@@ -690,7 +800,8 @@ export function createSqliteMiddleware(customDbPath) {
         return { emit: ["sync-status"], result: null };
       }
       case "reset_database": {
-        checkPin(db, args.pin);
+        checkAdminSettingsPin(db, args.pin);
+        createAutoSafetyBackup(db, backupDir, "before_reset");
         const isAll = args.branchId === "all";
         const isFull = args.resetType === "full";
         const tables = ["sales", "expenses", "ld_commissions", "commissions", "salaries"];
@@ -702,13 +813,166 @@ export function createSqliteMiddleware(customDbPath) {
         return { emit: ["sync-status"], result: null };
       }
       case "verify_admin_pin": {
-        const row = db.prepare("SELECT value FROM app_settings WHERE key = 'admin_pin'").get();
-        return { result: String(args.pin || "").trim() === String(row?.value || "0000").trim() };
+        try {
+          checkPin(db, args.pin);
+          return { result: true };
+        } catch {
+          return { result: false };
+        }
       }
-      case "change_admin_pin":
-        checkPin(db, args.oldPin);
-        db.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('admin_pin', ?, datetime('now','localtime')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").run(requireText("New PIN", args.newPin));
+      case "change_admin_pin": {
+        checkAdminSettingsPin(db, args.oldPin);
+        const cleanNew = requireText("New PIN", args.newPin);
+        if (cleanNew.length < 4 || cleanNew.length > 32) throw new Error("New admin PIN must be 4-32 characters.");
+        const conflict = Number(db.prepare("SELECT COUNT(*) as c FROM app_users WHERE pin = ? AND sync_id != 'user:owner'").get(cleanNew).c || 0);
+        if (conflict > 0) throw new Error("Another user already uses that PIN.");
+        setAdminPinSetting(db, cleanNew);
+        db.prepare("UPDATE app_users SET pin = ? WHERE sync_id = 'user:owner'").run(cleanNew);
         return { emit: ["sync-status"], result: null };
+      }
+
+      case "login_with_pin": {
+        const clean = String(args.pin || "").trim();
+        if (!clean) throw new Error("Please enter your PIN code.");
+        const row = db.prepare("SELECT * FROM app_users WHERE pin = ?").get(clean);
+        if (!row) throw new Error("Invalid PIN code. Please try again.");
+        const user = mapUserRow(row);
+        setLocalSetting(db, "active_user_name", user.name);
+        if (user.assignedBranchId) setLocalSetting(db, "active_branch", user.assignedBranchId);
+        return { result: user };
+      }
+      case "list_users":
+        return {
+          result: db
+            .prepare("SELECT * FROM app_users ORDER BY CASE WHEN sync_id='user:owner' THEN 0 ELSE 1 END, name COLLATE NOCASE")
+            .all()
+            .map(mapUserRow),
+        };
+      case "create_user": {
+        checkAdminSettingsPin(db, args.adminPin);
+        const inp = args.input || {};
+        const name = requireText("User name", inp.name);
+        const pin = String(inp.pin || "").trim();
+        if (pin.length < 4 || pin.length > 32) throw new Error("User PIN must be between 4 and 32 characters.");
+        const dup = Number(db.prepare("SELECT COUNT(*) as c FROM app_users WHERE pin = ?").get(pin).c || 0);
+        if (dup > 0) throw new Error("That PIN is already assigned to another user.");
+        const r = db
+          .prepare(
+            "INSERT INTO app_users (name, pin, role, assigned_branch_id, can_view_dashboard, can_add_records, can_edit_records, can_delete_records, can_manage_employees, can_manage_branches, can_manage_settings) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+          )
+          .run(
+            name,
+            pin,
+            requireText("Role", inp.role),
+            inp.assignedBranchId ? String(inp.assignedBranchId).trim() || null : null,
+            inp.canViewDashboard ? 1 : 0,
+            inp.canAddRecords ? 1 : 0,
+            inp.canEditRecords ? 1 : 0,
+            inp.canDeleteRecords ? 1 : 0,
+            inp.canManageEmployees ? 1 : 0,
+            inp.canManageBranches ? 1 : 0,
+            inp.canManageSettings ? 1 : 0,
+          );
+        return {
+          emit: ["sync-status"],
+          result: mapUserRow(db.prepare("SELECT * FROM app_users WHERE id = ?").get(Number(r.lastInsertRowid))),
+        };
+      }
+      case "update_user": {
+        checkAdminSettingsPin(db, args.adminPin);
+        const inp = args.input || {};
+        const name = requireText("User name", inp.name);
+        const pin = String(inp.pin || "").trim();
+        if (pin.length < 4 || pin.length > 32) throw new Error("User PIN must be between 4 and 32 characters.");
+        const otherAdmins = Number(db.prepare("SELECT COUNT(*) as c FROM app_users WHERE can_manage_settings = 1 AND id != ?").get(args.id).c || 0);
+        if (!inp.canManageSettings && otherAdmins === 0) throw new Error("At least one Owner / Admin user must keep Settings & Admin permissions.");
+        const dup = Number(db.prepare("SELECT COUNT(*) as c FROM app_users WHERE pin = ? AND id != ?").get(pin, args.id).c || 0);
+        if (dup > 0) throw new Error("That PIN is already assigned to another user.");
+        const cur = db.prepare("SELECT sync_id FROM app_users WHERE id = ?").get(args.id);
+        db.prepare(
+          "UPDATE app_users SET name=?, pin=?, role=?, assigned_branch_id=?, can_view_dashboard=?, can_add_records=?, can_edit_records=?, can_delete_records=?, can_manage_employees=?, can_manage_branches=?, can_manage_settings=? WHERE id=?",
+        ).run(
+          name,
+          pin,
+          requireText("Role", inp.role),
+          inp.assignedBranchId ? String(inp.assignedBranchId).trim() || null : null,
+          inp.canViewDashboard ? 1 : 0,
+          inp.canAddRecords ? 1 : 0,
+          inp.canEditRecords ? 1 : 0,
+          inp.canDeleteRecords ? 1 : 0,
+          inp.canManageEmployees ? 1 : 0,
+          inp.canManageBranches ? 1 : 0,
+          inp.canManageSettings ? 1 : 0,
+          args.id,
+        );
+        if (cur?.sync_id === "user:owner") {
+          setAdminPinSetting(db, pin);
+        }
+        return {
+          emit: ["sync-status"],
+          result: mapUserRow(db.prepare("SELECT * FROM app_users WHERE id = ?").get(args.id)),
+        };
+      }
+      case "delete_user": {
+        checkAdminSettingsPin(db, args.adminPin);
+        const cur = db.prepare("SELECT sync_id FROM app_users WHERE id = ?").get(args.id);
+        if (cur?.sync_id === "user:owner") throw new Error("The primary Owner / Admin account cannot be deleted.");
+        const otherAdmins = Number(db.prepare("SELECT COUNT(*) as c FROM app_users WHERE can_manage_settings = 1 AND id != ?").get(args.id).c || 0);
+        if (otherAdmins === 0) throw new Error("At least one Owner / Admin user must remain.");
+        db.prepare("DELETE FROM app_users WHERE id = ?").run(args.id);
+        return { emit: ["sync-status"], result: null };
+      }
+      case "list_safety_backups": {
+        if (!fs.existsSync(backupDir)) return { result: [] };
+        const files = fs
+          .readdirSync(backupDir)
+          .filter((f) => f.toLowerCase().endsWith(".db"))
+          .map((f) => {
+            const st = fs.statSync(path.join(backupDir, f));
+            const reason = f.includes("before_reset")
+              ? "Auto-backup before Database Reset"
+              : f.includes("before_delete_branch")
+                ? "Auto-backup before Branch Delete"
+                : f.includes("before_restore")
+                  ? "Auto-backup before Restore"
+                  : "Safety Snapshot";
+            const createdAt = f.replace(/\.db$/i, "").split("_").pop() || "";
+            return { filename: f, reason, createdAt, sizeBytes: st.size, m: st.mtimeMs };
+          })
+          .sort((a, b) => b.m - a.m)
+          .map(({ m, ...rest }) => rest);
+        return { result: files };
+      }
+      case "restore_safety_backup": {
+        checkAdminSettingsPin(db, args.pin);
+        const fn = String(args.filename || "");
+        if (!fn || fn.includes("/") || fn.includes("\\") || !fn.endsWith(".db")) throw new Error("Invalid safety backup filename.");
+        const srcPath = path.join(backupDir, fn);
+        if (!fs.existsSync(srcPath)) throw new Error("Selected safety backup no longer exists.");
+        createAutoSafetyBackup(db, backupDir, "before_restore");
+        const src = new DatabaseSync(srcPath);
+        db.exec("BEGIN");
+        try {
+          for (const t of ["sales", "expenses", "ld_commissions", "commissions", "salaries", "employees", "categories", "branches", "app_users"]) {
+            db.prepare(`DELETE FROM ${t}`).run();
+            const rows = src.prepare(`SELECT * FROM ${t}`).all();
+            if (rows.length > 0) {
+              const cols = Object.keys(rows[0]);
+              const placeholders = cols.map(() => "?").join(",");
+              const stmt = db.prepare(`INSERT INTO ${t} (${cols.join(",")}) VALUES (${placeholders})`);
+              for (const r of rows) stmt.run(...cols.map((c) => r[c]));
+            }
+          }
+          db.exec("COMMIT");
+        } catch (e) {
+          db.exec("ROLLBACK");
+          throw e;
+        } finally {
+          src.close();
+        }
+        queueAllLocalRecords(db);
+        return { emit: ["sync-updated", "sync-status"], result: null };
+      }
 
       case "get_sync_settings":
         return { result: getSyncStatus(db) };
@@ -725,7 +989,7 @@ export function createSqliteMiddleware(customDbPath) {
         return { result: `Connected successfully to ${url}` };
       }
       case "save_turso_settings": {
-        checkPin(db, args.pin);
+        checkAdminSettingsPin(db, args.pin);
         const url = String(args.tursoUrl || "").trim();
         const pipelineUrl = normalizeTursoUrl(url);
         const tok = String(args.tursoToken || "").trim() || getLocalSetting(db, "turso_token");
@@ -746,7 +1010,7 @@ export function createSqliteMiddleware(customDbPath) {
         return { emit: pulled > 0 ? ["sync-updated", "sync-status"] : ["sync-status"], result: getSyncStatus(db) };
       }
       case "disconnect_turso":
-        checkPin(db, args.pin);
+        checkAdminSettingsPin(db, args.pin);
         setLocalSetting(db, "sync_enabled", "0");
         setLocalSetting(db, "turso_token", "");
         setLocalSetting(db, "last_sync_cursor", "0");

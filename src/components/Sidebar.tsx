@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import logoImg from "../assets/logo.webp";
+import { useAuth } from "../context/AuthContext";
 import { useBranch } from "../context/BranchContext";
 import { errorMessage, getSyncSettings, onSyncEvent, syncNow } from "../lib/api";
 import type { SyncStatus } from "../types/models";
@@ -38,7 +39,10 @@ function Icon({ path }: { path: string }) {
 
 export function Sidebar() {
   const toast = useToast();
+  const { currentUser, lockSession } = useAuth();
   const { branches, currentBranch, currentBranchId, switchBranch, createBranch } = useBranch();
+  const canSwitchBranch = !!currentUser?.canManageBranches && !currentUser?.assignedBranchId;
+  const visibleNav = NAV.filter((item) => item.icon !== "dashboard" || !!currentUser?.canViewDashboard);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [addBranchOpen, setAddBranchOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -143,8 +147,15 @@ export function Sidebar() {
         <button
           type="button"
           id="sidebar-branch-select-btn"
-          onClick={() => setDropdownOpen(!dropdownOpen)}
-          className="flex w-full items-center justify-between gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-left transition-all duration-200 hover:bg-amber-500/10 hover:border-amber-500/40 hover:shadow-sm hover:shadow-amber-500/10 active:scale-[0.99]"
+          onClick={() => {
+            if (canSwitchBranch) setDropdownOpen(!dropdownOpen);
+          }}
+          disabled={!canSwitchBranch}
+          className={`flex w-full items-center justify-between gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-left transition-colors duration-200 ${
+            canSwitchBranch
+              ? "hover:bg-amber-500/10 hover:border-amber-500/40 cursor-pointer"
+              : "opacity-80 cursor-default"
+          }`}
         >
           <div className="flex items-center gap-2.5 truncate">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500/30 to-amber-600/10 text-amber-300 border border-amber-500/30">
@@ -153,21 +164,25 @@ export function Sidebar() {
               </svg>
             </span>
             <div className="truncate leading-tight">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-400/70">Current Branch</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-400/70">
+                {canSwitchBranch ? "Current Branch" : "Assigned Branch"}
+              </p>
               <p className="truncate text-sm font-bold text-white">
                 {currentBranch?.name || "Main Branch"}
               </p>
             </div>
           </div>
-          <svg
-            className={`h-4 w-4 shrink-0 text-amber-400/80 transition-transform duration-300 ${dropdownOpen ? "rotate-180" : ""}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
+          {canSwitchBranch && (
+            <svg
+              className={`h-4 w-4 shrink-0 text-amber-400/80 transition-transform duration-300 ${dropdownOpen ? "rotate-180" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          )}
         </button>
 
         {/* Dropdown Menu */}
@@ -225,7 +240,7 @@ export function Sidebar() {
 
       {/* Main Navigation */}
       <nav className="flex-1 space-y-1 px-3" aria-label="Main navigation">
-        {NAV.map((item) => (
+        {visibleNav.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -251,7 +266,24 @@ export function Sidebar() {
       </nav>
 
       {/* Footer / Settings Link */}
-      <div className="space-y-3 p-4 border-t border-amber-900/20 bg-black/20">
+      <div className="space-y-2.5 p-4 border-t border-amber-900/20 bg-black/20">
+        {currentUser && (
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-bold text-amber-200">{currentUser.name}</p>
+              <p className="text-[10px] uppercase tracking-wider text-amber-400/70">{currentUser.role}</p>
+            </div>
+            <button
+              type="button"
+              id="sidebar-switch-user-btn"
+              onClick={lockSession}
+              className="shrink-0 rounded-lg border border-amber-500/30 bg-slate-900/80 px-2.5 py-1 text-[10px] font-bold text-amber-300 hover:bg-amber-500/15 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            >
+              Switch / Lock
+            </button>
+          </div>
+        )}
+
         <NavLink
           to="/settings"
           id="nav-settings"
@@ -265,6 +297,7 @@ export function Sidebar() {
         >
           <Icon path={ICONS.settings} />
           Settings & Database
+          {!currentUser?.canManageSettings && <span className="text-xs opacity-75">🔒</span>}
         </NavLink>
 
         {/* Device & Sync Status Indicator */}

@@ -6,9 +6,12 @@ import type {
   Employee,
   EmployeeInput,
   ModuleKey,
+  SafetyBackupItem,
   SuggestionKind,
   SyncStatus,
   Totals,
+  UserAccount,
+  UserInput,
 } from "../types/models";
 
 const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -84,7 +87,8 @@ export const exportCsv = (module: ModuleKey, filter: DateFilter, path: string, b
 
 export const backupDatabase = (path: string) => callBackend<void>("backup_database", { path });
 
-export const restoreDatabase = (path: string) => callBackend<void>("restore_database", { path });
+export const restoreDatabase = (path: string, pin?: string) =>
+  callBackend<void>("restore_database", { path, pin });
 
 // ---------- Admin & Branch APIs ----------
 
@@ -130,6 +134,28 @@ export const syncNow = () => callBackend<SyncStatus>("sync_now");
 
 export const disconnectTurso = (pin: string) =>
   callBackend<SyncStatus>("disconnect_turso", { pin });
+
+// ---------- Multi-User Accounts, PINs & Safety Snapshots ----------
+
+export const loginWithPin = (pin: string) =>
+  callBackend<UserAccount>("login_with_pin", { pin });
+
+export const listUsers = () => callBackend<UserAccount[]>("list_users");
+
+export const createUser = (input: UserInput, adminPin: string) =>
+  callBackend<UserAccount>("create_user", { input, adminPin });
+
+export const updateUser = (id: number, input: UserInput, adminPin: string) =>
+  callBackend<UserAccount>("update_user", { id, input, adminPin });
+
+export const deleteUser = (id: number, adminPin: string) =>
+  callBackend<void>("delete_user", { id, adminPin });
+
+export const listSafetyBackups = () =>
+  callBackend<SafetyBackupItem[]>("list_safety_backups");
+
+export const restoreSafetyBackup = (filename: string, pin: string) =>
+  callBackend<void>("restore_safety_backup", { filename, pin });
 
 /** Subscribe to Tauri backend sync events (`sync-updated` or `sync-status`) safely. */
 export function onSyncEvent(eventName: "sync-updated" | "sync-status", handler: () => void): () => void {

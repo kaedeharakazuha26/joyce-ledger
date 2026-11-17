@@ -18,7 +18,7 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let conn = db::open(&dir.join(DB_FILE_NAME))?;
-            app.manage(DbState::new(conn));
+            app.manage(DbState::with_backup_dir(conn, Some(dir.join("safety_backups"))));
 
             let handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -120,6 +120,13 @@ pub fn run() {
             commands::admin::save_turso_settings,
             commands::admin::sync_now,
             commands::admin::disconnect_turso,
+            commands::admin::login_with_pin,
+            commands::admin::list_users,
+            commands::admin::create_user,
+            commands::admin::update_user,
+            commands::admin::delete_user,
+            commands::admin::list_safety_backups,
+            commands::admin::restore_safety_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Joyce Restobar Ledger");

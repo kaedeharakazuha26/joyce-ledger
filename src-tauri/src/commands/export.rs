@@ -171,11 +171,17 @@ pub fn restore_from(dest_conn: &mut Connection, backup_path: &str) -> AppResult<
 }
 
 #[tauri::command]
-pub fn restore_database(state: State<'_, DbState>, path: String) -> AppResult<()> {
+pub fn restore_database(state: State<'_, DbState>, path: String, pin: Option<String>) -> AppResult<()> {
     let mut conn = state.conn()?;
+    crate::commands::admin::check_admin_settings_pin(&conn, pin.as_deref().unwrap_or(""))?;
+    let _ = crate::commands::admin::create_auto_safety_backup(
+        &conn,
+        state.backup_dir.as_deref(),
+        "before_restore",
+    )?;
     // Preserve this device's local sync & device identity settings across restore
     let preserved_local: Vec<(String, String)> = conn
-        .prepare("SELECT key, value FROM local_settings WHERE key IN ('device_name','turso_url','turso_token','sync_enabled')")
+        .prepare("SELECT key, value FROM local_settings WHERE key IN ('device_name','turso_url','turso_token','sync_enabled','active_user_name')")
         .and_then(|mut s| {
             s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
                 .collect::<Result<Vec<_>, _>>()

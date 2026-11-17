@@ -572,6 +572,85 @@ const MIGRATIONS: &[&str] = &[
       VALUES ('app_settings', 'admin_pin', 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now'));
     END;
     "#,
+    // v6: multi-user PIN accounts with granular permissions + Turso sync triggers
+    r#"
+    CREATE TABLE IF NOT EXISTS app_users (
+      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+      name                 TEXT    NOT NULL COLLATE NOCASE,
+      pin                  TEXT    NOT NULL UNIQUE,
+      role                 TEXT    NOT NULL DEFAULT 'cashier',
+      assigned_branch_id   TEXT,
+      can_view_dashboard   INTEGER NOT NULL DEFAULT 0,
+      can_add_records      INTEGER NOT NULL DEFAULT 1,
+      can_edit_records     INTEGER NOT NULL DEFAULT 0,
+      can_delete_records   INTEGER NOT NULL DEFAULT 0,
+      can_manage_employees INTEGER NOT NULL DEFAULT 0,
+      can_manage_branches  INTEGER NOT NULL DEFAULT 0,
+      can_manage_settings  INTEGER NOT NULL DEFAULT 0,
+      created_at           TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+      updated_at           TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+      sync_id              TEXT,
+      device_name          TEXT    NOT NULL DEFAULT ''
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_sync_id ON app_users(sync_id);
+
+    -- Seed the primary Owner account from the existing admin_pin before attaching outbox triggers
+    INSERT OR IGNORE INTO app_users (
+      name, pin, role, assigned_branch_id,
+      can_view_dashboard, can_add_records, can_edit_records, can_delete_records,
+      can_manage_employees, can_manage_branches, can_manage_settings,
+      sync_id
+    ) VALUES (
+      'Owner / Admin',
+      COALESCE((SELECT NULLIF(TRIM(value), '') FROM app_settings WHERE key = 'admin_pin'), '0000'),
+      'owner',
+      NULL,
+      1, 1, 1, 1, 1, 1, 1,
+      'user:owner'
+    );
+
+    INSERT OR IGNORE INTO local_settings (key, value) VALUES ('active_user_name', '');
+
+    CREATE TRIGGER IF NOT EXISTS trg_app_users_ai AFTER INSERT ON app_users
+    BEGIN
+      UPDATE app_users
+      SET sync_id = COALESCE(NULLIF(sync_id, ''), lower(hex(randomblob(16)))),
+          device_name = CASE WHEN device_name = '' THEN COALESCE((SELECT value FROM local_settings WHERE key = 'device_name'), '') ELSE device_name END
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      SELECT 'app_users', u.sync_id, 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM app_users u
+      WHERE u.rowid = NEW.rowid
+        AND COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_app_users_au AFTER UPDATE ON app_users
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND NEW.sync_id IS NOT NULL
+    BEGIN
+      UPDATE app_users
+      SET updated_at = datetime('now','localtime'),
+          device_name = COALESCE(NULLIF((SELECT value FROM local_settings WHERE key = 'device_name'), ''), device_name)
+      WHERE rowid = NEW.rowid;
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('app_users', NEW.sync_id, 'UPSERT', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_app_users_ad AFTER DELETE ON app_users
+    WHEN COALESCE((SELECT value FROM local_settings WHERE key = 'sync_applying_remote'), '0') = '0'
+      AND OLD.sync_id IS NOT NULL
+    BEGIN
+      INSERT OR REPLACE INTO sync_outbox (table_name, sync_id, op, branch_id, changed_at)
+      VALUES ('app_users', OLD.sync_id, 'DELETE', 'global', strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_sync_admin_pin_to_owner AFTER UPDATE ON app_settings
+    WHEN NEW.key = 'admin_pin'
+    BEGIN
+      UPDATE app_users SET pin = NEW.value WHERE sync_id = 'user:owner' AND pin != NEW.value;
+    END;
+    "#,
 ];
 
 /// Latest schema version known to this build.
@@ -613,12 +692,12 @@ mod tests {
         let tables: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
-                 ('sales','expenses','ld_commissions','commissions','salaries','employees','categories','branches','app_settings','local_settings','sync_outbox')",
+                 ('sales','expenses','ld_commissions','commissions','salaries','employees','categories','branches','app_settings','local_settings','sync_outbox','app_users')",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables, 11);
+        assert_eq!(tables, 12);
     }
 
     #[test]

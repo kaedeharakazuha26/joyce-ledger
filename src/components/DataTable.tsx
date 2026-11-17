@@ -12,6 +12,8 @@ interface DataTableProps<T extends { id: number }> {
   columns: Column<T>[];
   rows: T[];
   editingId?: number | null;
+  canEdit?: boolean;
+  canDelete?: boolean;
   onEdit: (row: T) => void;
   onDelete: (row: T) => void;
   footer?: ReactNode;
@@ -19,7 +21,17 @@ interface DataTableProps<T extends { id: number }> {
 
 const alignClass = (a?: string) => (a === "right" ? "text-right" : a === "center" ? "text-center" : "text-left");
 
-export function DataTable<T extends { id: number }>({ idPrefix, columns, rows, editingId, onEdit, onDelete, footer }: DataTableProps<T>) {
+export function DataTable<T extends { id: number }>({
+  idPrefix,
+  columns,
+  rows,
+  editingId,
+  canEdit = true,
+  canDelete = true,
+  onEdit,
+  onDelete,
+  footer,
+}: DataTableProps<T>) {
   return (
     <div className="overflow-auto">
       <table className="w-full border-separate border-spacing-0 text-base">
@@ -53,16 +65,19 @@ export function DataTable<T extends { id: number }>({ idPrefix, columns, rows, e
                 ))}
                 <td className="border-b border-slate-100 px-5 py-2 text-right dark:border-slate-800/70">
                   <div className="inline-flex gap-2">
-                    <button id={`${idPrefix}-edit-${row.id}`} type="button" className="btn-secondary btn-sm" onClick={() => onEdit(row)}>
-                      Edit
-                    </button>
+                    {canEdit && (
+                      <button id={`${idPrefix}-edit-${row.id}`} type="button" className="btn-secondary btn-sm" onClick={() => onEdit(row)}>
+                        Edit
+                      </button>
+                    )}
                     <button
                       id={`${idPrefix}-delete-${row.id}`}
                       type="button"
+                      title={canDelete ? "Delete record" : "Requires Manager / Owner PIN to delete"}
                       className="btn btn-sm border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:bg-slate-900 dark:hover:bg-rose-950"
                       onClick={() => onDelete(row)}
                     >
-                      Delete
+                      {canDelete ? "Delete" : "Delete 🔒"}
                     </button>
                   </div>
                 </td>

@@ -17,8 +17,8 @@ An offline-first, multi-laptop desktop ledger and financial reporting system eng
 ## 🌟 Key Features & How the App Works
 
 ### 1. Offline-First Multi-Laptop Cloud Sync (Turso)
-- **Concurrent Multi-Laptop Entry (3–10+ Devices)**: Every device writes first to its fast local SQLite database (`<1ms`, zero lock contention, works even when internet drops) and syncs automatically in the background every 8 seconds via Turso's HTTP v2 pipeline (`/v2/pipeline`).
-- **Conflict-Free Sync IDs**: Schema migration `v5` equips every record with a unique `sync_id` (32-hex UUID for transactions; deterministic natural keys for branches, categories, and employees) and trigger-driven `sync_outbox` (`WITHOUT ROWID`), preventing auto-increment ID collisions or overwritten rows when multiple laptops save simultaneously offline.
+- **Concurrent Multi-Laptop Entry (3–10+ Devices)**: Every device writes first to its fast local SQLite database (`<1ms`, zero lock contention, works even when internet drops) and syncs automatically to Turso's HTTP v2 pipeline (`/v2/pipeline`) with adaptive cadence (pushing within ~2s on local edits, polling every 30s idle / 60s on error to minimize Turso row reads).
+- **Conflict-Free Sync IDs**: Schema migrations `v5`–`v6` equip every record and user account with a unique `sync_id` (32-hex UUID for transactions/users; deterministic natural keys for branches, categories, and employees) and trigger-driven `sync_outbox` (`WITHOUT ROWID`), preventing auto-increment ID collisions or overwritten rows when multiple laptops save simultaneously offline.
 - **Per-Laptop Device Identity & Local Branch Isolation**: Each computer sets its own **Device Name** (e.g., *Main Cashier Laptop*, *Branch 2 Desk*) and keeps `active_branch`, `turso_url`, and `turso_token` local in `local_settings`—so one cashier switching branches never switches another laptop's active branch.
 - **Single Shared Database for All Branches**: One Turso database safely stores every branch (partitioned by `branch_id`) and syncs live status to the sidebar footer (`Turso Cloud Synced`, `Offline · N queued`, or `Local Offline Mode`).
 
@@ -51,10 +51,15 @@ Clicking **"Print Report"** opens a customizable report generator:
 - **Commissions & Base Salary**: Track sales commissions, bonuses, and fixed staff payroll disbursements.
 - **Employee Roster**: Register active staff and positions (Cashier, Bartender, Server, PR, etc.) with default base salary, commission, and LD commission per drink rates.
 
-### 6. Security & Settings
-- **Admin PIN Protection**: High-security actions (Saving/Disconnecting Turso Cloud Sync, Branch Deletion, Branch Data Reset, Record Deletion) require the Master Admin PIN (default: `0000`, synced across connected laptops).
-- **Change Admin PIN**: Secure PIN update workflow requiring previous PIN verification.
-- **Live Database Backup & Restore**: Hot SQLite backup to any directory, plus safe atomic database restore that preserves each laptop's local device identity and Turso sync credentials.
+### 6. Multi-User PINs, Permissions & Triple-Layer Anti-Wipe Safety (`v2.1.0`)
+- **Multi-User PIN Accounts**: Create accounts with unique PINs, optional assigned branches (branch-locked cashiers), and role presets (**Owner / Admin**, **Manager**, **Cashier**, **Custom**) synced automatically across all laptops via Turso.
+- **7 Granular Permissions**: Control per-user access to **View Dashboard**, **Add Records**, **Edit Records**, **Delete Records**, **Manage Employees**, **Manage Branches**, and **Database Settings & Turso Sync**.
+- **On-the-Spot Manager/Owner Delete Override**: Cashiers can enter daily transactions freely without delete rights; attempting a deletion prompts for a Manager or Owner PIN without logging the cashier out.
+- **Triple-Layer Anti-Wipe Safety**:
+  1. **Owner-Only Destructive Settings**: Only accounts with **Settings & Admin** permission can reset records, delete branches, overwrite via restore, or alter Turso Cloud Sync settings (with anti-lockout protection so the last Owner/Admin cannot be deleted).
+  2. **Typed `RESET` Safety Gate**: Resetting database records requires both the Owner/Admin PIN and typing `RESET` to confirm.
+  3. **Automatic Safety Snapshots (1-Click Undo)**: Every reset, branch deletion, or restore automatically writes a timestamped SQLite snapshot to `safety_backups/` (`before_reset`, `before_delete_branch`, `before_restore`) that owners can restore in one click from Settings.
+- **Change Admin PIN & Manual Backup**: Update the Owner PIN or export a hot SQLite backup to any folder (restores preserve each laptop's local device identity and Turso sync credentials).
 
 ---
 
@@ -85,6 +90,7 @@ ledger-app-react-rust/
 │   │   ├── TextInput.tsx        # Form text inputs with autocomplete datalist
 │   │   └── Toast.tsx            # Floating feedback notifications
 │   ├── context/
+│   │   ├── AuthContext.tsx      # Black-Gold PIN Lock screen, active user session & role permissions
 │   │   └── BranchContext.tsx    # Global active branch state and branch management
 │   ├── hooks/
 │   │   ├── useRecords.ts        # Generic transaction hook (fetch, add, edit, delete, CSV export, sync refresh)
@@ -122,7 +128,7 @@ ledger-app-react-rust/
 │   │   │   └── suggestions.rs   # Category and name autocomplete queries
 │   │   ├── db/
 │   │   │   ├── mod.rs           # DbState, SQLite WAL configuration & connection lifecycle
-│   │   │   ├── migrations.rs    # Incremental SQLite schema migrations (v1-v5)
+│   │   │   ├── migrations.rs    # Incremental SQLite schema migrations (v1-v6)
 │   │   │   └── sync.rs          # Conflict-free Turso HTTP v2 pipeline sync engine
 │   │   ├── error.rs             # Centralized AppError enum (thiserror)
 │   │   ├── lib.rs               # Tauri plugin registration, background sync worker & builder entrypoint
